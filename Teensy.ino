@@ -34,9 +34,9 @@ struct FlightData {
 //LoRa specific pins
 #define LoRaCS 37
 #define LoRaRST 9
-#define LoRaGO 8
-#define RF95_FEQ 915.0
-RH_RF95 rf95(RFM95_CS, RFM95_INT);
+#define LoRaINT 8
+#define RF95_FREQ 915.0
+RH_RF95 rf95(LoRaCS, LoRaINT);
 
 //DFR0515 Specific Pins
 #define DFRCS 36
@@ -74,36 +74,55 @@ void setup() {
     Serial.println("LoRa set up failed");
     while(1);
   }
+  if (!rf95.setFrequency(RF95_FREQ)) {
+  Serail.println("LoRa frequency set failed");
+  while(1);
 
+  }
   //Here we set the radio power to 23 dBm. The false and 23 are from the radios documentation, I don't really understand this like that
   rf95.setTxPower(23, false);
   //false has to do with the PA_BOOST pin whatever that is
+  rf95.setSpreadFactor(8);
+  ref95.setSignalBandwidth(125E3);
+  ref95.setCodingRate4(5);
 
   //Set up Sensors
   if (!bmp.begin_I2C()) {
-    serial_print("BMP Error");
+    serial.print("BMP Error");
     while(1);
   } 
+  //BMP config, stuff straight out of the BMP3 Bosch code
+  bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_2X);
+  bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
+  bmp.setOutputDataRate(BMP3_ODR_50_HZ);
+
   for(int i=0; i<20; i++) { //logic for getting the pressure on the rail
     bmp.performReading();
     sum += bmp.pressure; // Pascals
     delay(20);
   }
   //Calibrate the pressure on the pad
-  BaseAGLPressure = (sum / 10.0) / 100.0;
+  BaseAGLPressure = (sum / 20.0) / 100.0;
   Serial.print("Pad Pressure Calibrated to: ");
   Serial.println(BaseAGLPressure);
 
   if (!lsm6ds.begin_I2C()) {
-    serial_print("LSM Error");
-    while(1);
-  }
-  if (!adxl.begin()) {
-    serial_print("ADXL Error");
+    serial.print("LSM Error");
     while(1);
   }
 
-  FlightData.state = 0; // setting equal to for On the ground 
+//LSM6DOX config
+  lsm6ds.setAccelRange(LSM6DS_ACCEL_RANGE_16_G);
+  lsm6ds.setGyroRange(LSM6DS_GYRO_RANGE_2000_DPS);
+  lsm6ds.setAccelDataRate(LSM6DS_Rate_104_HZ);
+  lsm6ds.setGyroDataRate(LSM6DS_RATE_104_HZ);
+
+  if (!adxl.begin()) {
+    serial.print("ADXL Error");
+    while(1);
+  }  
+  adxl.setDataRate(ADXL343_DATARATE_100_HZ);
+  currentPacket.state = 0; // setting equal to for On the ground 
 }
 
 //Start main loop by reading data
@@ -133,8 +152,8 @@ void loop() {
   lsm6ds.getEvent(&lsm_accel, &lsm_gyro, &lsm_temp);
 
   currentPacket.gyroRoll = lsm_gyro.gyro.x;
-  currentPacket.gyroPitch = lsm_gyro.y;
-  currentPacket.gyroYaw = lsm_gyro.z;
+  currentPacket.gyroPitch = lsm_gyro.gyro.y;
+  currentPacket.gyroYaw = lsm_gyro.gyro.z;
 
   //Finally send the packet of flight data
   rf95.send((unit_8t *)&currentPacket, sizeof(currentPacket));
