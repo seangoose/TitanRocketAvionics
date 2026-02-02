@@ -116,7 +116,7 @@ void loop() {
   // Sensor data goes: Update Sensor -> Read Sensor Data -> Fill Pakcet
 
   // BMP Data fetch
-  bmp.performReading(); //
+  bmp.performReading(); // 
   currentPacket.altitude = bmp.readAltitude(BaseAGLPressure) * 3.28084; // BMP returns height in meters
   currentPacket.timestamp = currentTime;
 
@@ -137,7 +137,8 @@ void loop() {
   currentPacket.gyroYaw = lsm_gyro.z;
 
   //Finally send the packet of flight data
-  rf95.send((unit_8t))
+  rf95.send((unit_8t *)&currentPacket, sizeof(currentPacket));
+  rf95.waitPacketSent();
 
 
   //Debug of flgiht data
