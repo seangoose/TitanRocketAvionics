@@ -254,13 +254,13 @@ void FireGate1() {
     #if Stage == 1
       Serial.println("Back Up Chute deploy used");
     #elif Stage == 2
-      Serail.println("Back Up Sustainer used");
+      Serial.println("Back Up Sustainer used");
     #endif
   }
 }
 
 void FireGate2() {
-  if(!gate2_fire) {
+  if(!gate2_fired) {
     digitalWrite(Gate2, HIGH);
     gate2_fire_time = millis();
     gate2_fired = true;
@@ -271,7 +271,7 @@ void FireGate2() {
       Serial.print("Water Payload Activated");
     #endif
   }
-
+}
 void updateMosfets() {
   #if Stage == 1
     if (gate1_fired && (millis() - gate1_fire_time > GATE1_FIRE_TIME)) {
@@ -288,7 +288,7 @@ void updateMosfets() {
 }
 
 void updateFlightState() {
-  altitude_velocity = (currentPacket.altitude - prev_altitude) / (Tele_Rate/ 1000.0)
+  altitude_velocity = (currentPacket.altitude - prev_altitude) / (Tele_Rate/ 1000.0);
 
   float accel_mag = sqrt(
     currentPacket.accelThrust * currentPacket.accelThrust +
@@ -300,7 +300,7 @@ void updateFlightState() {
     currentPacket.gyroPitch * currentPacket.gyroPitch +
     currentPacket.gyroYaw * currentPacket.gyroYaw
 
-  )
+  );
 
 
   // Flight State Logics
@@ -318,7 +318,7 @@ void updateFlightState() {
       break;
 
       case Boost:
-      if (accel_mag > 15 (millis() - liftoff_time > 2000)) {
+      if (accel_mag > 15 && (millis() - liftoff_time > 2000)) {
         currentPacket.state = Coast;
         Serial.println("First Coast");
       }
@@ -329,8 +329,8 @@ void updateFlightState() {
 
       if ((accel_delta > 20) ||  (gyro_mag > 500)) {
         currentPacket.state = Separation;
-        separation detected = true;
-        separation_time - millis();
+        separation_detected = true;
+        separation_time = millis();
         Serial.println("seperation occured");
 
       }
@@ -345,7 +345,7 @@ void updateFlightState() {
       case Descent:
 
       if (currentPacket. altitude < 2000 && altitude_velocity < -30) {
-        fireGate1();
+        FireGate1();
       }
       if (currentPacket.altitude < 100 && abs(altitude_velocity) < 2) {
         currentPacket.state = Landed;
@@ -368,14 +368,14 @@ void updateFlightState() {
       }
       break;
 
-      case Boost_S1;
+      case Boost_S1:
       if (accel_mag < 15 && (millis() - liftoff_time > 2000)) {
         currentPacket.state = Coast_S1;
         Serial.println("Stage 1 Coasting atm");
       }
       break;
 
-      case Coast_S1;
+      case Coast_S1:
       float accel_delta = abs(accel_mag - prev_accel_mag);
       
       if (accel_delta > 20) {
@@ -395,7 +395,7 @@ void updateFlightState() {
       
       case Coast_S2:
         if ((millis() - separation_time > 2000) && !gate2_fired && altitude_velocity < 10) {
-          fireGate1();
+          FireGate1();
           currentPacket.state = Boost_S2;
           Serial.println("Used BackUp ignitor");
         }
@@ -412,12 +412,11 @@ void updateFlightState() {
         }
       break;
 
-      case Coast_Apogee;
+      case Coast_Apogee:
         if (prev_altitude_velocity > 0 && altitude_velocity < 0) {
           apogee_detected = true;
           currentPacket.state = Apogee;
-          fireGate2();
-          }
+          FireGate2();
         }
       break;
 
@@ -432,6 +431,7 @@ void updateFlightState() {
           currentPacket.state = Landed;
           Serial.println("Landed");
         }
+      break;
       case Landed:
       break;
     }
