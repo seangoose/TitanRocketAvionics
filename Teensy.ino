@@ -22,8 +22,8 @@ Adafruit_ADXL375 adxl(375); //Older ADAfruit set up package, needs an identifer.
 struct FlightData {
   uint32_t timestamp; // time in milliseconds
   float altitude; // converted from bmp pressure
-  float accelXThrust; // horizontal?
-  float accelZLateral; // Vertical ?
+  float accelXThrust; // horizontal? (THIS IS VERTICAL THRUST UP)
+  float accelZLateral; // Vertical ? (SIDES)
   float gyroRoll; // LSM6DSOX spin check and orientation following
   float gyroPitch; // Both pitch and yaw relate to the rockets tilt around the Z axis or think of the xz, and yz planes
   float gyroYaw;
@@ -49,16 +49,26 @@ RH_RF95 rf95(LoRaCS, LoRaINT);
 #define Gate1 2
 #define Gate2 3
 
-#define GATE1_DURATION 1000
-#define GATE2_DURATION 1000
-#define WATER_DURATION 3000
 
+// Mosfet gate fire time durations
 #if Stage == 1
   #define GATE1_FIRE_TIME 1000
 #elif Stage == 2
   #define GATE1_FIRE_TIME 3000
   #define GATE2_FIRE_TIME 1000
 #endif
+
+unsigned long gate1_fire_time = 0;
+unsigned long gate2_fire_time = 0;
+
+bool gate1_fired = false;
+bool gate2_fired = false;
+
+//For State of rocket tracking
+float prev_altitude_velocity = 0;
+unsigned long liftoff_time =0;
+bool liftoff_detected = false;
+
 
 // For sensor change tracking
 
@@ -84,6 +94,33 @@ float BaseAGLPressure = 0;
 float sum = 0;
 
 
+// Flight state logic for both stages
+
+#if Stage == 1
+
+  enum RocketState {
+    Pad = 0,
+    Boost = 1,
+    Coast = 2,
+    Separation = 3,
+    Descent = 4,
+    Landed = 5
+  };
+#elif Stage == 2
+  enum RocketState {
+    Pad = 0,
+    Boost_S1 = 1,
+    Coast_S1 = 2,
+    Separation = 3,
+    Boost_S2 = 4,
+    Coast_S2 = 5,
+    Coast_Apogee = 6,
+    Apogee = 7,
+    Descent = 8,
+    Landed = 9
+  };
+#endif
+
 // standard Arduino setup()
 void setup() {
   Serial.begin(115200);
@@ -98,6 +135,10 @@ void setup() {
   digitalWrite(LoRaRST, LOW); // Pulling RST to low makes the radio reset
   delay(10);
   digitalWrite(LoRaRST, HIGH); // Pulling back to high ensures the radio stays on.
+  pinMode(Gate1, OUTPUT);
+  pinMode(Gate2, OUTPUT);
+  digitalWrite(Gate1, LOW);  // Start in SAFE state
+  digitalWrite(Gate2, LOW);
   // Continued intillization of Radio
   if (!rf95.init()) {
     Serial.println("LoRa set up failed");
@@ -140,37 +181,6 @@ void setup() {
     Serial.print("LSM Error");
     while(1);
   }
-
-  // if (currentPacket.Stage == 1) {
-
-  // enum RocketState {
-  //   PAD          = 0,  // On ground, armed
-  //   BOOST        = 1,  // Motor firing (accel > 3g)
-  //   COAST        = 2,  // Post-burnout, ascending (accel < 1g)
-  //   SEPARATION   = 3,  // Separation event detected
-  //   DESCENT      = 4,  // Descending (altitude decreasing)
-  //   LANDED       = 5   // On ground (low altitude + no movement)
-  // };
-
-  // }
-
-  // if (currentPacket.Stage == 2) { 
-
-  // enum RocketState {
-  //   PAD           = 0,  // On ground, armed
-  //   BOOST_S1      = 1,  // Stage 1 boosting (passenger)
-  //   COAST_S1      = 2,  // Stage 1 coasting (passenger)
-  //   SEPARATION    = 3,  // Separation detected
-  //   COAST_S2      = 4,  // Post-separation coast
-  //   BOOST_S2      = 5,  // Sustainer firing
-  //   COAST_APOGEE  = 6,  // Coasting to apogee
-  //   APOGEE        = 7,  // At apogee, deploy water
-  //   DESCENT       = 8,  // Descending
-  //   LANDED        = 9   // On ground
-  // };
-
-  // }
-
 
 //LSM6DOX config
   lsm6ds.setAccelRange(LSM6DS_ACCEL_RANGE_16_G);
@@ -217,8 +227,11 @@ void loop() {
   currentPacket.gyroPitch = lsm_gyro.gyro.y;
   currentPacket.gyroYaw = lsm_gyro.gyro.z;
 
+  updateFlightState();
+  updateMosfets(); 
+
   //Finally send the packet of flight data
-  rf95.send((unit8_t *)&currentPacket, sizeof(currentPacket));
+  rf95.send((uint8_t *)&currentPacket, sizeof(currentPacket));
   rf95.waitPacketSent();
 
   //Debug of flgiht data
@@ -229,4 +242,201 @@ void loop() {
 
   }
 
+}
+
+
+void FireGate1() {
+  if(!gate1_fired) {
+    digitalWrite(Gate1, HIGH);
+    gate1_fire_time = millis();
+    gate1_fired = true;
+
+    #if Stage == 1
+      Serial.println("Back Up Chute deploy used");
+    #elif Stage == 2
+      Serail.println("Back Up Sustainer used");
+    #endif
+  }
+}
+
+void FireGate2() {
+  if(!gate2_fire) {
+    digitalWrite(Gate2, HIGH);
+    gate2_fire_time = millis();
+    gate2_fired = true;
+
+    #if Stage == 1
+      Serial.println("Secondary Back Up used");
+    #elif Stage == 2
+      Serial.print("Water Payload Activated");
+    #endif
+  }
+
+void updateMosfets() {
+  #if Stage == 1
+    if (gate1_fired && (millis() - gate1_fire_time > GATE1_FIRE_TIME)) {
+      digitalWrite(Gate1, LOW);
+    }
+  #elif Stage ==2
+    if (gate1_fired && (millis() - gate1_fire_time > GATE1_FIRE_TIME)) {
+      digitalWrite(Gate1, LOW);
+    }
+    if (gate2_fired && (millis() - gate2_fire_time > GATE2_FIRE_TIME)) {
+      digitalWrite(Gate2, LOW);
+    }
+  #endif
+}
+
+void updateFlightState() {
+  altitude_velocity = (currentPacket.altitude - prev_altitude) / (Tele_Rate/ 1000.0)
+
+  float accel_mag = sqrt(
+    currentPacket.accelThrust * currentPacket.accelThrust +
+    currentPacket.accelZLateral * currentPacket.accelZLateral
+  );
+
+  float gyro_mag = sqrt(
+    currentPacket.gyroRoll * currentPacket.gyroRoll +
+    currentPacket.gyroPitch * currentPacket.gyroPitch +
+    currentPacket.gyroYaw * currentPacket.gyroYaw
+
+  )
+
+
+  // Flight State Logics
+
+  #if Stage == 1
+    switch(currentPacket.state) {
+      case Pad:
+
+      if (accel_mag > 30) {
+        currentPacket.state = Boost;
+        liftoff_time = millis();
+        liftoff_detected = true;
+        Serial.println("Boost Detected");
+      }
+      break;
+
+      case Boost:
+      if (accel_mag > 15 (millis() - liftoff_time > 2000)) {
+        currentPacket.state = Coast;
+        Serial.println("First Coast");
+      }
+      break;
+      
+      case Coast:
+      float accel_delta = abs(accel_mag - prev_accel_mag);
+
+      if ((accel_delta > 20) ||  (gyro_mag > 500)) {
+        currentPacket.state = Separation;
+        separation detected = true;
+        separation_time - millis();
+        Serial.println("seperation occured");
+
+      }
+      break;
+
+      case Separation:
+      if (altitude_velocity < -2) {
+        currentPacket.state = Descent;
+      }
+      break;
+
+      case Descent:
+
+      if (currentPacket. altitude < 2000 && altitude_velocity < -30) {
+        fireGate1();
+      }
+      if (currentPacket.altitude < 100 && abs(altitude_velocity) < 2) {
+        currentPacket.state = Landed;
+        Serial.println("landed");
+      }
+      break;
+      case Landed:
+      break;
+    }
+
+  #elif Stage == 2
+    switch (currentPacket.state) {
+
+      case Pad:
+      if (accel_mag >30) {
+        currentPacket.state = Boost_S1;
+        liftoff_time = millis();
+        liftoff_detected = true;
+        Serial.println("Launch detect");
+      }
+      break;
+
+      case Boost_S1;
+      if (accel_mag < 15 && (millis() - liftoff_time > 2000)) {
+        currentPacket.state = Coast_S1;
+        Serial.println("Stage 1 Coasting atm");
+      }
+      break;
+
+      case Coast_S1;
+      float accel_delta = abs(accel_mag - prev_accel_mag);
+      
+      if (accel_delta > 20) {
+        currentPacket.state = Separation;
+        separation_detected = true;
+        separation_time = millis();
+        Serial.println("Separation Detected");
+
+      }
+      break;
+      case Separation:
+        if ((millis() - separation_time > 500) && altitude_velocity > 0) {
+          currentPacket.state = Coast_S2;
+          Serial.println("Coast Stage 2 Hopefully");
+        }
+      break;
+      
+      case Coast_S2:
+        if ((millis() - separation_time > 2000) && !gate2_fired && altitude_velocity < 10) {
+          fireGate1();
+          currentPacket.state = Boost_S2;
+          Serial.println("Used BackUp ignitor");
+        }
+        if (accel_mag > 20) {
+          currentPacket.state = Boost_S2;
+          Serial.println("Stage 2 boosting air start");
+        }
+      break;
+      
+      case Boost_S2:
+        if (accel_mag < 15) {
+          currentPacket.state = Coast_Apogee;
+          Serial.println("Apogee Approach");
+        }
+      break;
+
+      case Coast_Apogee;
+        if (prev_altitude_velocity > 0 && altitude_velocity < 0) {
+          apogee_detected = true;
+          currentPacket.state = Apogee;
+          fireGate2();
+          }
+        }
+      break;
+
+      case Apogee:
+        if (altitude_velocity < -5) {
+          currentPacket.state = Descent;
+        }
+      break;
+
+      case Descent:
+        if (currentPacket.altitude < 100 && abs(altitude_velocity) < 2) {
+          currentPacket.state = Landed;
+          Serial.println("Landed");
+        }
+      case Landed:
+      break;
+    }
+  #endif
+  prev_altitude = currentPacket.altitude;
+  prev_altitude_velocity = altitude_velocity;
+  prev_accel_mag = accel_mag;
 }
