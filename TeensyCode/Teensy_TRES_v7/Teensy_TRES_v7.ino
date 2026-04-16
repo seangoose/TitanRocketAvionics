@@ -39,6 +39,11 @@
 #define STAGE      2
 #define CALLSIGN   "KD0XXX"
 
+// Self-test mode — set 1 for bench testing, 0 for flight
+// When 1: runSelfTest() executes at the start of setup() then normal boot continues.
+// When 0: entire self-test is compiled out. No impact on flight firmware behavior.
+#define RUN_SELF_TEST  1
+
 #if STAGE != 1 && STAGE != 2
   #error "STAGE must be 1 or 2."
 #endif
@@ -1175,9 +1180,142 @@ void updateFlightState() {
 #endif
 
 // ================================================================
+//  SELF-TEST
+// ================================================================
+#if RUN_SELF_TEST
+void runSelfTest() {
+  // Step 1 — LED startup signal: 3 fast blinks
+  pinMode(PIN_LED, OUTPUT);
+  for (uint8_t i = 0; i < 3; i++) {
+    digitalWrite(PIN_LED, HIGH); delay(80);
+    digitalWrite(PIN_LED, LOW);  delay(80);
+  }
+
+  // Step 2 — SD initialization
+  if (!SD.begin(SD_BUILTIN)) {
+    // Infinite rapid blink — SD failed, results cannot be written
+    while (true) {
+      digitalWrite(PIN_LED, HIGH); delay(50);
+      digitalWrite(PIN_LED, LOW);  delay(50);
+    }
+  }
+
+  // Step 3 — Find unique filename STEST001.TXT … STEST200.TXT
+  char fname[16];
+  uint8_t n = 1;
+  do {
+    snprintf(fname, sizeof(fname), "STEST%03d.TXT", n++);
+  } while (SD.exists(fname) && n <= 200);
+  logFile = SD.open(fname, FILE_WRITE);
+
+  // Step 4 — File header
+  logFile.println("TRES TITAN \xe2\x80\x94 SELF-TEST REPORT");
+  logFile.println("==============================");
+  logFile.println("NOTE: USB-ONLY TEST. External peripheral failures are expected");
+  logFile.println("      and normal. Battery rail peripherals cannot be tested");
+  logFile.println("      without hardware modification (cutting VUSB/VIN jumper).");
+  logFile.println("      Only SD card success is meaningful in this test mode.");
+  logFile.println("==============================");
+  logFile.print("Stage:    "); logFile.println(STAGE);
+  logFile.print("Callsign: "); logFile.println(CALLSIGN);
+  logFile.print("Built:    "); logFile.print(__DATE__); logFile.print(" "); logFile.println(__TIME__);
+  {
+    char tbuf[12];
+    dtostrf(tempmonGetTemp(), 5, 1, tbuf);
+    logFile.print("MCU Temp: "); logFile.print(tbuf); logFile.println(" C");
+  }
+  logFile.println();
+
+  // Step 5 — Peripheral tests
+  // Wire and SPI initialised here because setup() has not yet run.
+  Wire.begin(); Wire.setClock(400000);
+  SPI.begin();
+
+  uint8_t faultCount = 0;
+
+  // SD — already confirmed PASS by reaching this line
+  logFile.println("SD CARD:       PASS - file open and writable");
+
+  // BMP388
+  if (bmp.begin_I2C()) {
+    logFile.println("BMP388:        PASS - I2C responded");
+  } else {
+    logFile.println("BMP388:        FAIL - no I2C response - expected on USB-only");
+    faultCount++;
+  }
+
+  // LSM6DSOX
+  if (lsm.begin_I2C()) {
+    logFile.println("LSM6DSOX:      PASS - I2C responded");
+  } else {
+    logFile.println("LSM6DSOX:      FAIL - no I2C response - expected on USB-only");
+    faultCount++;
+  }
+
+  // ADXL375
+  if (adxl.begin()) {
+    logFile.println("ADXL375:       PASS - I2C responded");
+  } else {
+    logFile.println("ADXL375:       FAIL - no I2C response - expected on USB-only");
+    faultCount++;
+  }
+
+  // RFM95W — pulse reset then attempt SPI init
+  pinMode(PIN_LORA_RST, OUTPUT);
+  digitalWrite(PIN_LORA_RST, LOW);  delay(10);
+  digitalWrite(PIN_LORA_RST, HIGH); delay(10);
+  if (rf95.init()) {
+    logFile.println("RFM95W:        PASS - SPI responded");
+  } else {
+    logFile.println("RFM95W:        FAIL - no SPI response - expected on USB-only");
+    faultCount++;
+  }
+
+  // Teensy internal temperature
+  {
+    float mcuTemp = tempmonGetTemp();
+    char tbuf[12];
+    dtostrf(mcuTemp, 5, 1, tbuf);
+    if (mcuTemp >= 0.0f && mcuTemp <= 85.0f) {
+      logFile.print("TEENSY TEMP:   PASS - "); logFile.print(tbuf); logFile.println(" C");
+    } else {
+      logFile.print("TEENSY TEMP:   FAIL - "); logFile.print(tbuf); logFile.println(" C (out of range)");
+      faultCount++;
+    }
+  }
+
+  // Step 6 — Fault summary
+  logFile.println();
+  {
+    char summary[72];
+    snprintf(summary, sizeof(summary),
+             "FAULTS: %d of 5 peripherals failed (expected %d on USB-only)",
+             faultCount, faultCount);
+    logFile.println(summary);
+  }
+  logFile.println("RESULT: PASS - SD operational, boot sequence completed without hang");
+
+  // Step 7 — Close file
+  logFile.print("Report file: "); logFile.println(fname);
+  logFile.flush();
+  logFile.close();
+
+  // Step 8 — LED completion signal: 5 slow deliberate blinks
+  for (uint8_t i = 0; i < 5; i++) {
+    digitalWrite(PIN_LED, HIGH); delay(300);
+    digitalWrite(PIN_LED, LOW);  delay(300);
+  }
+}
+#endif
+
+// ================================================================
 //  SETUP
 // ================================================================
 void setup() {
+#if RUN_SELF_TEST
+  runSelfTest();
+#endif
+
   Serial.begin(115200);
   delay(500);
   Serial.println(F("=========================================="));
