@@ -1,0 +1,93 @@
+# =============================================================================
+#  TRES Titan Ground Station — config.py
+#  All configurable constants in one place.
+#  Edit this file before every launch / test session.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+#  SERIAL PORTS
+#  Run `ls /dev/ttyUSB* /dev/ttyACM*` after plugging in each device to find
+#  the correct port assignments. Disconnect one device at a time to confirm.
+# -----------------------------------------------------------------------------
+
+# Adafruit M0 LoRa radio — Stage 1 uplink/downlink
+M0_S1_PORT     = "/dev/ttyUSB0"
+M0_S1_BAUD     = 115200
+
+# Adafruit M0 LoRa radio — Stage 2 uplink/downlink
+M0_S2_PORT     = "/dev/ttyUSB1"
+M0_S2_BAUD     = 115200
+
+# Featherweight GPS Ground Station V2 — USB serial
+# Baud rate: 57600 per Featherweight documentation (Appendix A).
+# Verify against your unit's serial output if packets appear garbled.
+FW_GPS_PORT    = "/dev/ttyACM0"
+FW_GPS_BAUD    = 57600
+
+# -----------------------------------------------------------------------------
+#  VIDEO CAPTURE
+#  Capture cards appear as /dev/video0, /dev/video1, etc.
+#  Run `v4l2-ctl --list-devices` to identify which index is which camera.
+# -----------------------------------------------------------------------------
+
+VIDEO_S1_INDEX = 0    # Stage 1 camera capture card device index
+VIDEO_S2_INDEX = 1    # Stage 2 camera capture card device index
+
+# Frame size requested from capture card
+# Most USB capture cards support 640x480 at 30 fps reliably on Pi 5.
+# If your card supports 1280x720, increase these.
+VIDEO_WIDTH    = 640
+VIDEO_HEIGHT   = 480
+VIDEO_FPS      = 30
+
+# -----------------------------------------------------------------------------
+#  RADIO FREQUENCIES — INITIAL / DEFAULT VALUES
+#  These are the startup defaults. Both can be changed live via the command
+#  panel, which will retune the M0 radio and send CMD_SET_LORA_FREQ to the
+#  rocket. Frequencies must stay within 902.0–928.0 MHz (USA ISM band).
+# -----------------------------------------------------------------------------
+
+LORA_S1_FREQ_MHZ   = 915.0   # Stage 1 LoRa starting frequency
+LORA_S2_FREQ_MHZ   = 915.0   # Stage 2 LoRa starting frequency
+                               # Use different frequencies if interference observed
+
+# VTX frequencies — display only, not used to command radio hardware directly.
+# These are updated by STATUS packets received from the rocket.
+VTX_S1_FREQ_MHZ    = 5800
+VTX_S2_FREQ_MHZ    = 5800
+
+# -----------------------------------------------------------------------------
+#  MAP — LAUNCH SITE COORDINATES
+#  Center the map on your launch site. Degrees decimal.
+#  FAR (Friends of Amateur Rocketry), Mojave CA:
+MAP_CENTER_LAT     = 35.3462467793672
+MAP_CENTER_LON     = -117.81008271636995
+MAP_CENTER_ZOOM    = 15       # 15 = neighbourhood scale, good for tracking
+
+# Tile cache directory — used by cache_tiles.py for offline pre-download
+# and referenced in map.html for offline tile fallback.
+TILE_CACHE_DIR     = "./tile_cache"
+
+# -----------------------------------------------------------------------------
+#  UI SETTINGS
+# -----------------------------------------------------------------------------
+
+APP_TITLE          = "TRES Titan Ground Station"
+DARK_MODE          = True       # Dark theme (recommended for outdoor use)
+VIDEO_REFRESH_MS   = 33         # ~30 fps video widget refresh
+TELEM_REFRESH_MS   = 100        # Telemetry panel refresh rate
+
+# -----------------------------------------------------------------------------
+#  TEST MODE DEFAULTS
+# -----------------------------------------------------------------------------
+
+# Whether to start in test mode (should be False for flight day)
+TEST_MODE_DEFAULT  = False
+
+# Full system test duration in seconds
+# Fires VTX, RunCam, 10Hz telemetry, and Stage 2 solenoid simultaneously
+# for battery evaluation and system validation
+FULL_SYS_TEST_DURATION_S = 90
+
+# Stage names for display
+STAGE_NAMES = {1: "Stage 1 (Booster)", 2: "Stage 2 (Sustainer)"}

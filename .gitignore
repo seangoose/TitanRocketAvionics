@@ -1,0 +1,18 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Recording outputs
+recordings/
+
+# Map tile cache
+tile_cache/
+
+# Data files
+*.csv
+*.mp4
+*.avi
+
+# Claude Code configuration
+.claude/
