@@ -501,7 +501,7 @@ bool initLoRa() {
   if (!rf95.init()) { faultFlags|=FAULT_LORA; Serial.println("[LoRa] FAIL"); return false; }
   if (!rf95.setFrequency(RF95_FREQ_DEFAULT)) { faultFlags|=FAULT_LORA; return false; }
   rf95.setTxPower(RF95_TX_DBM,false);
-  rf95.setSpreadFactor(RF95_SF);
+  rf95.setSpreadingFactor(RF95_SF);
   rf95.setSignalBandwidth(RF95_BW);
   rf95.setCodingRate4(RF95_CR);
   rf95.setModeRx();
