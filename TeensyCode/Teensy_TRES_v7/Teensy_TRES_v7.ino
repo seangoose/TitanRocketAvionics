@@ -1215,6 +1215,7 @@ void runSelfTest() {
   logFile.println("      and normal. Battery rail peripherals cannot be tested");
   logFile.println("      without hardware modification (cutting VUSB/VIN jumper).");
   logFile.println("      Only SD card success is meaningful in this test mode.");
+  logFile.println("      DFR0515 result is meaningful only if the chip is installed on the PCB.");
   logFile.println("==============================");
   logFile.print("Stage:    "); logFile.println(STAGE);
   logFile.print("Callsign: "); logFile.println(CALLSIGN);
@@ -1271,6 +1272,49 @@ void runSelfTest() {
     faultCount++;
   }
 
+  // DFR0515 (AT7456E OSD) — SPI bus check via software reset and STAT register poll.
+  // Inlined SPI transactions match osdWrite/osdRead pattern exactly (SPISettings 4 MHz, MSBFIRST, MODE0).
+  // Chip absent: every read returns 0xFF. Reset complete: bit 6 (0x40) of STAT clears.
+  {
+    bool osdPass = false;
+    bool allFF   = true;
+    pinMode(PIN_OSD_CS, OUTPUT);
+    digitalWrite(PIN_OSD_CS, HIGH);
+
+    // Write VM0 register (0x00): set software reset bit (0x02).
+    // Write address = register | 0x80 = 0x80.
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(PIN_OSD_CS, LOW);
+    SPI.transfer(0x80);
+    SPI.transfer(0x02);
+    digitalWrite(PIN_OSD_CS, HIGH);
+    SPI.endTransaction();
+
+    delay(2);
+
+    // Poll STAT register for up to 5 ms.
+    // Read address = 0xA0 & 0x7F = 0x20.
+    // Reset complete when bit 6 clears. All-0xFF means chip absent.
+    unsigned long t0 = millis();
+    while (millis() - t0 < 5) {
+      SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+      digitalWrite(PIN_OSD_CS, LOW);
+      SPI.transfer(0x20);
+      uint8_t stat = SPI.transfer(0x00);
+      digitalWrite(PIN_OSD_CS, HIGH);
+      SPI.endTransaction();
+      if (stat != 0xFF) allFF = false;
+      if (!allFF && !(stat & 0x40)) { osdPass = true; break; }
+    }
+
+    if (osdPass) {
+      logFile.println("DFR0515 (AT7456E): PASS - SPI responded, reset completed");
+    } else {
+      logFile.println("DFR0515 (AT7456E): FAIL - no SPI response (chip not installed or wiring fault)");
+      faultCount++;
+    }
+  }
+
   // Teensy internal temperature
   {
     float mcuTemp = tempmonGetTemp();
@@ -1289,7 +1333,7 @@ void runSelfTest() {
   {
     char summary[72];
     snprintf(summary, sizeof(summary),
-             "FAULTS: %d of 5 peripherals failed (expected %d on USB-only)",
+             "FAULTS: %d of 6 peripherals failed (expected %d on USB-only)",
              faultCount, faultCount);
     logFile.println(summary);
   }
