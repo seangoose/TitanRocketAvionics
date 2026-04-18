@@ -194,9 +194,9 @@ function showLostRocket(name, lat, lon, altFt) {
    .addTo(map);
 }
 
-function setPadLocation(lat, lon) {
+function setPadLocation(lat, lon, zoom) {
   padMarker.setLatLng([lat,lon]);
-  map.setView([lat,lon], mapZoom);
+  map.setView([lat,lon], zoom !== undefined ? zoom : mapZoom);
 }
 
 function clearTracks() {

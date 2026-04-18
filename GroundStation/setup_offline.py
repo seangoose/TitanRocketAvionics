@@ -24,10 +24,7 @@ import math
 import time
 import shutil
 import requests
-from config import (
-    MAP_CENTER_LAT, MAP_CENTER_LON,
-    TILE_CACHE_DIR
-)
+from config import MAP_SITES, TILE_CACHE_DIR
 
 # ── Leaflet build to download ─────────────────────────────────────────────
 LEAFLET_VERSION = "1.9.4"
@@ -48,12 +45,7 @@ LEAFLET_IMAGES  = {
 # ── Tile download settings ───────────────────────────────────────────────
 TILE_URL       = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
 SUBDOMAINS     = ["a", "b", "c"]
-MIN_ZOOM       = 10
-MAX_ZOOM       = 17
-# Margin in decimal degrees around MAP_CENTER.
-# 0.15° ≈ 16 km at Mojave latitude.
-# Increase for larger coverage (more tiles, more time).
-MARGIN_DEG     = 0.15
+MIN_ZOOM       = 10      # minimum zoom cached for all sites
 DELAY_S        = 0.05    # 20 tiles/second — respects OSM usage policy
 HEADERS        = {
     "User-Agent": (
@@ -131,32 +123,26 @@ def download_leaflet() -> bool:
 
 
 # =============================================================================
-#  STEP 2 — MAP TILES
+#  STEP 2 — MAP TILES (all sites)
 # =============================================================================
 
-def download_tiles() -> dict:
-    print("\n── Step 2: OSM map tiles ──────────────────────────────────────")
-    print(f"  Center:  {MAP_CENTER_LAT}°N, {MAP_CENTER_LON}°E")
-    print(f"  Radius:  ±{MARGIN_DEG}° (~{MARGIN_DEG * 111:.0f} km)")
-    print(f"  Zooms:   {MIN_ZOOM}–{MAX_ZOOM}")
-    print()
+def download_tiles_for_site(site_key: str, site: dict, sd_idx: int, stats: dict) -> int:
+    lat      = site["lat"]
+    lon      = site["lon"]
+    margin   = site["margin"]
+    max_zoom = site["max_zoom"]
 
-    # Estimate total tile count before downloading
-    total_est = 0
-    for z in range(MIN_ZOOM, MAX_ZOOM + 1):
-        x1, y1, x2, y2 = tile_range(MAP_CENTER_LAT, MAP_CENTER_LON, MARGIN_DEG, z)
-        total_est += (x2 - x1 + 1) * (y2 - y1 + 1)
-    print(f"  Estimated tiles to download: ~{total_est}")
-    print()
+    total_est = sum(
+        (tile_range(lat, lon, margin, z)[2] - tile_range(lat, lon, margin, z)[0] + 1) *
+        (tile_range(lat, lon, margin, z)[3] - tile_range(lat, lon, margin, z)[1] + 1)
+        for z in range(MIN_ZOOM, max_zoom + 1)
+    )
+    print(f"\n  Site: {site['name']}  |  ±{margin}° radius  |  zoom {MIN_ZOOM}–{max_zoom}  |  ~{total_est} tiles")
 
-    stats  = {"downloaded": 0, "skipped": 0, "failed": 0}
-    sd_idx = 0
-
-    for zoom in range(MIN_ZOOM, MAX_ZOOM + 1):
-        x_min, y_min, x_max, y_max = tile_range(
-            MAP_CENTER_LAT, MAP_CENTER_LON, MARGIN_DEG, zoom)
+    for zoom in range(MIN_ZOOM, max_zoom + 1):
+        x_min, y_min, x_max, y_max = tile_range(lat, lon, margin, zoom)
         count = (x_max - x_min + 1) * (y_max - y_min + 1)
-        print(f"  Zoom {zoom:2d}: {count:5d} tiles", end="  ", flush=True)
+        print(f"    Zoom {zoom:2d}: {count:5d} tiles", end="  ", flush=True)
 
         zoom_dl = 0
         for x in range(x_min, x_max + 1):
@@ -169,7 +155,6 @@ def download_tiles() -> dict:
                     continue
 
                 os.makedirs(out_dir, exist_ok=True)
-
                 sub = SUBDOMAINS[sd_idx % len(SUBDOMAINS)]
                 sd_idx += 1
                 url = (TILE_URL
@@ -193,6 +178,15 @@ def download_tiles() -> dict:
 
         print(f"✓ {zoom_dl} new, {count - zoom_dl} cached")
 
+    return sd_idx
+
+
+def download_tiles() -> dict:
+    print("\n── Step 2: OSM map tiles (all sites) ─────────────────────────")
+    stats  = {"downloaded": 0, "skipped": 0, "failed": 0}
+    sd_idx = 0
+    for key, site in MAP_SITES.items():
+        sd_idx = download_tiles_for_site(key, site, sd_idx, stats)
     return stats
 
 
@@ -212,14 +206,15 @@ def verify_offline():
             size = os.path.getsize(path)
             print(f"  ✓  assets/{fname}  ({size:,} bytes)")
 
-    # Check tile coverage at a mid zoom level
-    check_zoom = 13
-    x, y = deg2tile(MAP_CENTER_LAT, MAP_CENTER_LON, check_zoom)
-    center_tile = os.path.join(TILE_CACHE_DIR, str(check_zoom), str(x), f"{y}.png")
-    if os.path.exists(center_tile):
-        print(f"  ✓  Center tile at zoom {check_zoom} present")
-    else:
-        issues.append(f"MISSING: center tile at zoom {check_zoom}")
+    # Check center tile for each site
+    for key, site in MAP_SITES.items():
+        check_zoom = min(13, site["max_zoom"])
+        x, y = deg2tile(site["lat"], site["lon"], check_zoom)
+        center_tile = os.path.join(TILE_CACHE_DIR, str(check_zoom), str(x), f"{y}.png")
+        if os.path.exists(center_tile):
+            print(f"  ✓  {site['name']} center tile at zoom {check_zoom} present")
+        else:
+            issues.append(f"MISSING: {site['name']} center tile at zoom {check_zoom}")
 
     # Count total cached tiles
     tile_count = sum(

@@ -112,6 +112,10 @@ class MapWidget(QWidget):
         """Move the pad marker (e.g. after GPS fix on the ground station)."""
         self._js(f"setPadLocation({lat}, {lon});")
 
+    def set_site(self, lat: float, lon: float, zoom: int):
+        """Recenter map and move pad marker to a named launch site."""
+        self._js(f"setPadLocation({lat}, {lon}, {zoom});")
+
     def clear_tracks(self):
         """Wipe all flight path polylines and markers."""
         self._js("clearTracks();")

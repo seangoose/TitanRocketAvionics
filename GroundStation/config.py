@@ -58,13 +58,46 @@ VTX_S2_FREQ_MHZ    = 5800
 
 # -----------------------------------------------------------------------------
 #  MAP — LAUNCH SITE COORDINATES
-#  Center the map on your launch site. Degrees decimal.
-#  FAR (Friends of Amateur Rocketry), Mojave CA:
-MAP_CENTER_LAT     = 35.3462467793672
-MAP_CENTER_LON     = -117.81008271636995
-MAP_CENTER_ZOOM    = 15       # 15 = neighbourhood scale, good for tracking
+#  MAP_CENTER_* sets the startup view. Change MAP_ACTIVE_SITE to switch sites.
+#  Site selector buttons in the Map panel also switch at runtime.
+# -----------------------------------------------------------------------------
 
-# Tile cache directory — used by cache_tiles.py for offline pre-download
+MAP_SITES = {
+    "FAR":  {
+        "name":     "FAR — Mojave",
+        "lat":      35.3462467793672,
+        "lon":      -117.81008271636995,
+        "zoom":     15,
+        "margin":   0.15,   # ~16 km radius tile cache
+        "max_zoom": 17,
+    },
+    "CSUF": {
+        "name":     "CSUF — Fullerton",
+        "lat":      33.8825,
+        "lon":      -117.8851,
+        "zoom":     15,
+        "margin":   0.05,   # ~5 km radius
+        "max_zoom": 15,
+    },
+    "MDARS": {
+        "name":     "MDARS",
+        "lat":      35.104944,
+        "lon":      -117.795194,
+        "zoom":     15,
+        "margin":   0.05,
+        "max_zoom": 15,
+    },
+}
+
+# Which site to center on at startup
+MAP_ACTIVE_SITE = "FAR"
+
+_site = MAP_SITES[MAP_ACTIVE_SITE]
+MAP_CENTER_LAT  = _site["lat"]
+MAP_CENTER_LON  = _site["lon"]
+MAP_CENTER_ZOOM = _site["zoom"]
+
+# Tile cache directory — used by setup_offline.py for offline pre-download
 # and referenced in map.html for offline tile fallback.
 TILE_CACHE_DIR     = "./tile_cache"
 

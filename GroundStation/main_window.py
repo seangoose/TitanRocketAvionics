@@ -576,8 +576,19 @@ class CommandPanel(QWidget):
         layout.addWidget(fst)
 
         # ── 8. MAP ──────────────────────────────────────────────
-        mg = QGroupBox("Map"); ml = QHBoxLayout(mg)
-        self.clear_tracks_btn = QPushButton("Clear Tracks"); ml.addWidget(self.clear_tracks_btn)
+        mg = QGroupBox("Map"); mgl = QGridLayout(mg)
+        self.clear_tracks_btn = QPushButton("Clear Tracks")
+        mgl.addWidget(self.clear_tracks_btn, 0, 0, 1, 3)
+
+        mgl.addWidget(QLabel("Jump to site:"), 1, 0)
+        self.site_btns = {}
+        col = 1
+        for key, site in config.MAP_SITES.items():
+            b = QPushButton(key)
+            b.setToolTip(site["name"])
+            self.site_btns[key] = b
+            mgl.addWidget(b, 1, col)
+            col += 1
         layout.addWidget(mg)
 
         layout.addStretch()
@@ -1054,6 +1065,11 @@ class MainWindow(QMainWindow):
         self._cmd_panel = CommandPanel(self._radio_s1, self._radio_s2,
                                        self._data_rec)
         self._cmd_panel.clear_tracks_btn.clicked.connect(self._map.clear_tracks)
+        for key, btn in self._cmd_panel.site_btns.items():
+            site = config.MAP_SITES[key]
+            btn.clicked.connect(
+                lambda _=False, s=site: self._map.set_site(s["lat"], s["lon"], s["zoom"])
+            )
         self._rec_panel = RecordingPanel(self._vid_s1, self._vid_s2,
                                          self._data_rec)
         side.addWidget(self._cmd_panel, 3)
