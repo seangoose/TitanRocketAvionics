@@ -23,7 +23,8 @@ from data_recorder import DataRecorder, PacketStatsTracker
 from map_widget    import MapWidget
 from radio_worker  import RadioWorker
 from gps_worker    import FWGPSWorker
-from video_worker  import VideoWorker
+from video_worker      import VideoWorker
+from video_file_worker import VideoFileWorker
 
 
 # =============================================================================
@@ -304,6 +305,22 @@ class RecordingPanel(QGroupBox):
         g.addWidget(self._s1v_lbl,  3, 0, 1, 3)
         g.addWidget(self._s2v_lbl,  4, 0, 1, 3)
         g.addWidget(self._data_lbl, 5, 0, 1, 3)
+
+        # Showcase mode toggle
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine); sep.setStyleSheet("color:#30363d;")
+        g.addWidget(sep, 6, 0, 1, 3)
+
+        self._showcase_btn = QPushButton("🎬  Showcase Mode: OFF")
+        self._showcase_btn.setObjectName("confirm")
+        self._showcase_btn.setToolTip(
+            "Showcase mode: replaces one video panel with a looping highlight reel.\n"
+            "Configure SHOWCASE_VIDEO_PATH and SHOWCASE_STAGE in config.py.\n"
+            "Live capture continues on the other panel.")
+        g.addWidget(self._showcase_btn, 7, 0, 1, 3)
+
+        self._showcase_status = QLabel("Showcase: OFF")
+        self._showcase_status.setObjectName("telem_label")
+        g.addWidget(self._showcase_status, 8, 0, 1, 3)
 
     def _start_all(self):
         name = self._name_edit.text().strip()
@@ -1001,6 +1018,12 @@ class MainWindow(QMainWindow):
                                      config.VIDEO_WIDTH, config.VIDEO_HEIGHT,
                                      config.VIDEO_FPS)
 
+        # Showcase mode state
+        self._showcase_active = config.SHOWCASE_MODE_DEFAULT
+        self._showcase_worker: "VideoFileWorker | None" = None
+        self._sc_status_slot = None
+        self._sc_conn_slot   = None
+
         self._build_ui()
         self._wire_signals()
         self._start_workers()
@@ -1104,6 +1127,9 @@ class MainWindow(QMainWindow):
             lambda s, a, p: self._video_s1.set_recording(a, p))
         self._vid_s2.recording_changed.connect(
             lambda s, a, p: self._video_s2.set_recording(a, p))
+
+        # Showcase mode
+        self._rec_panel._showcase_btn.clicked.connect(self._toggle_showcase)
 
     # ------------------------------------------------------------------
 
@@ -1283,12 +1309,144 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    #  Showcase Mode
+    # ------------------------------------------------------------------
+
+    def _toggle_showcase(self):
+        if not self._showcase_active:
+            if self._data_rec.is_recording:
+                QMessageBox.information(self, "Showcase Mode",
+                    "Stop recording before enabling showcase mode.")
+                return
+            self._start_showcase()
+        else:
+            self._stop_showcase()
+
+    def _start_showcase(self):
+        if not config.SHOWCASE_VIDEO_PATH:
+            QMessageBox.warning(self, "Showcase Mode",
+                "SHOWCASE_VIDEO_PATH is not set in config.py. "
+                "Edit config.py and set the absolute path to your showcase video file.")
+            return
+        if config.SHOWCASE_STAGE not in (1, 2):
+            QMessageBox.warning(self, "Showcase Mode",
+                "SHOWCASE_STAGE must be 1 or 2. Check config.py.")
+            return
+
+        # Identify the live worker and panel for the showcase stage
+        if config.SHOWCASE_STAGE == 1:
+            old_worker = self._vid_s1
+            panel      = self._video_s1
+        else:
+            old_worker = self._vid_s2
+            panel      = self._video_s2
+
+        # Stop live capture for this stage
+        old_worker.stop()
+        old_worker.wait(2000)
+
+        # Disconnect old worker's signals from panel
+        try: old_worker.frame_ready.disconnect(panel.update_frame)
+        except RuntimeError: pass
+        try: old_worker.status_message.disconnect()
+        except RuntimeError: pass
+        try: old_worker.recording_changed.disconnect()
+        except RuntimeError: pass
+        try: old_worker.connection_changed.disconnect()
+        except RuntimeError: pass
+
+        # Create and wire the file worker
+        self._showcase_worker = VideoFileWorker(
+            config.SHOWCASE_STAGE,
+            config.SHOWCASE_VIDEO_PATH,
+            config.SHOWCASE_FRAME_DELAY_MS
+        )
+        self._showcase_worker.frame_ready.connect(panel.update_frame)
+        self._sc_status_slot = lambda s, m: panel.set_status(m)
+        self._sc_conn_slot   = lambda s, c: panel.set_status(
+            "Showcase: file loaded" if c else "Showcase: file not found — check SHOWCASE_VIDEO_PATH")
+        self._showcase_worker.status_message.connect(self._sc_status_slot)
+        self._showcase_worker.connection_changed.connect(self._sc_conn_slot)
+
+        # Redirect RecordingPanel so its no-op methods are called harmlessly
+        if config.SHOWCASE_STAGE == 1:
+            self._rec_panel._vid_s1 = self._showcase_worker
+        else:
+            self._rec_panel._vid_s2 = self._showcase_worker
+
+        self._showcase_worker.start()
+
+        # Update UI
+        self._showcase_active = True
+        btn = self._rec_panel._showcase_btn
+        btn.setText("🎬  Showcase Mode: ON — Click to Disable")
+        btn.setObjectName("rec_active")
+        btn.style().unpolish(btn); btn.style().polish(btn)
+        self._rec_panel._showcase_status.setText(
+            f"Showcase: S{config.SHOWCASE_STAGE} → {os.path.basename(config.SHOWCASE_VIDEO_PATH)}")
+        self._debug.append(
+            f"[SHOWCASE] Started — S{config.SHOWCASE_STAGE} playing {config.SHOWCASE_VIDEO_PATH}")
+
+    def _stop_showcase(self):
+        if self._showcase_worker is not None:
+            self._showcase_worker.stop()
+            self._showcase_worker.wait(2000)
+
+            panel = self._video_s1 if config.SHOWCASE_STAGE == 1 else self._video_s2
+
+            # Disconnect showcase worker signals
+            try: self._showcase_worker.frame_ready.disconnect(panel.update_frame)
+            except RuntimeError: pass
+            try:
+                if self._sc_status_slot:
+                    self._showcase_worker.status_message.disconnect(self._sc_status_slot)
+            except RuntimeError: pass
+            try:
+                if self._sc_conn_slot:
+                    self._showcase_worker.connection_changed.disconnect(self._sc_conn_slot)
+            except RuntimeError: pass
+            try: self._showcase_worker.recording_changed.disconnect()
+            except RuntimeError: pass
+
+            # Reconnect and restart the live capture worker
+            if config.SHOWCASE_STAGE == 1:
+                live_worker = self._vid_s1
+                self._rec_panel._vid_s1 = live_worker
+            else:
+                live_worker = self._vid_s2
+                self._rec_panel._vid_s2 = live_worker
+
+            live_worker.frame_ready.connect(panel.update_frame)
+            live_worker.status_message.connect(lambda s, m: panel.set_status(m))
+            live_worker.recording_changed.connect(lambda s, a, p: panel.set_recording(a, p))
+            live_worker.start()
+
+            self._showcase_worker = None
+            self._sc_status_slot  = None
+            self._sc_conn_slot    = None
+
+        self._showcase_active = False
+        btn = self._rec_panel._showcase_btn
+        btn.setText("🎬  Showcase Mode: OFF")
+        btn.setObjectName("confirm")
+        btn.style().unpolish(btn); btn.style().polish(btn)
+        self._rec_panel._showcase_status.setText("Showcase: OFF")
+        self._debug.append("[SHOWCASE] Stopped — live capture restored")
+
+    # ------------------------------------------------------------------
+
     def _start_workers(self):
         for w in [self._radio_s1, self._radio_s2, self._gps_wkr,
                   self._vid_s1, self._vid_s2]:
             w.start()
 
     def closeEvent(self, event):
+        if self._showcase_active:
+            self._stop_showcase()
+        if self._showcase_worker:
+            self._showcase_worker.stop()
+            self._showcase_worker.wait(2000)
         # Stop any active recording cleanly before exit
         if self._data_rec.is_recording:
             self._data_rec.stop_recording()

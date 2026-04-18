@@ -91,3 +91,18 @@ FULL_SYS_TEST_DURATION_S = 90
 
 # Stage names for display
 STAGE_NAMES = {1: "Stage 1 (Booster)", 2: "Stage 2 (Sustainer)"}
+
+# -----------------------------------------------------------------------------
+#  SHOWCASE MODE
+#  In showcase mode one video panel plays a pre-rendered looping video file
+#  instead of a live capture feed. The other panel keeps the live feed.
+#  Set SHOWCASE_VIDEO_PATH to the absolute path of your video file.
+#  Set SHOWCASE_STAGE to 1 or 2 — this stage's panel plays the file.
+#  The opposite stage keeps its live capture card feed.
+# -----------------------------------------------------------------------------
+
+SHOWCASE_MODE_DEFAULT   = False         # Start in showcase mode on launch
+SHOWCASE_STAGE          = 1            # Which stage panel plays the file (1 or 2)
+SHOWCASE_VIDEO_PATH     = ""           # Absolute path to showcase video file
+                                        # e.g. "/home/pi/showcase/TRES_highlight.mp4"
+SHOWCASE_FRAME_DELAY_MS = 33           # ~30 fps playback (match your video's frame rate)

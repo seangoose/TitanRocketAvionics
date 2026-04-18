@@ -52,6 +52,7 @@ TresCode/
 - **Live Map**: Offline-first Leaflet.js map with GPS tracking
 - **Command & Control**: Ground mode switching, VTX/LoRa tuning, solenoid control
 - **Full System Test**: 90-second battery evaluation with packet statistics and automated reporting
+- **Showcase Mode**: Replaces one video panel with a looping pre-rendered highlight reel for presentations while keeping the other panel live. Configure via `SHOWCASE_VIDEO_PATH` and `SHOWCASE_STAGE` in `config.py`.
 - **Multi-threaded Architecture**: Separate QThreads for radio, GPS, and video
 
 ### Installation
