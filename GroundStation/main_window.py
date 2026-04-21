@@ -1,7 +1,6 @@
 # =============================================================================
 #  TRES Titan Ground Station — main_window.py
-#  Main application window: video feeds, live map, telemetry panels,
-#  command panel with full test mode, and recording controls.
+#  Main application window: four-quadrant layout with controls bar.
 # =============================================================================
 
 import os
@@ -87,6 +86,40 @@ QLabel#video_placeholder {
 QTabWidget::pane   { border:1px solid #30363d; }
 QTabBar::tab       { background:#161b22; color:#8b949e; padding:6px 14px; border:1px solid #21262d; }
 QTabBar::tab:selected { background:#21262d; color:#c9d1d9; }
+QGroupBox#controls_group {
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    margin-top: 5px;
+    padding-top: 4px;
+    font-size: 9px;
+    font-weight: bold;
+    color: #58a6ff;
+}
+QGroupBox#controls_group::title {
+    subcontrol-origin: margin;
+    left: 6px;
+    padding: 0 3px;
+}
+QLabel#section_header {
+    font-size: 12px;
+    font-weight: bold;
+    color: #58a6ff;
+    padding: 3px 0px;
+    border-bottom: 1px solid #21262d;
+    margin-bottom: 3px;
+}
+QSplitter::handle {
+    background-color: #21262d;
+}
+QSplitter::handle:horizontal {
+    width: 3px;
+}
+QSplitter::handle:vertical {
+    height: 3px;
+}
+QSplitter::handle:hover {
+    background-color: #388bfd;
+}
 """
 
 
@@ -125,7 +158,6 @@ class TelemetryPanel(QGroupBox):
         self._fault = QLabel("Faults: None"); self._fault.setObjectName("fault_ok")
         g.addWidget(self._fault, 6, 0, 1, 4)
 
-        # Ground mode indicator — large and prominent so it's always visible
         self._gmode = QLabel("MODE: —")
         self._gmode.setObjectName("state_label")
         g.addWidget(QLabel("GROUND MODE"), 7, 0)
@@ -168,7 +200,6 @@ class TelemetryPanel(QGroupBox):
         self._ts.setText(f"T+{d['timestamp_ms']/1000:.1f}s")
 
     def update_status(self, d: dict):
-        # Ground mode — prominent, colour-coded by mode
         gm   = d.get("ground_mode", 0)
         gname = P.ground_mode_name(gm)
         self._gmode.setText(f"MODE: {gname}")
@@ -245,15 +276,6 @@ class VideoPanel(QGroupBox):
 # =============================================================================
 
 class RecordingPanel(QGroupBox):
-    """
-    Controls for starting and stopping all recordings simultaneously:
-      - Stage 1 video
-      - Stage 2 video
-      - Flight data CSV (both stages)
-    All recordings share the same session name and timestamp prefix so
-    files from one session are easy to identify together.
-    """
-
     def __init__(self, vid_s1: VideoWorker, vid_s2: VideoWorker,
                  data_recorder: DataRecorder, parent=None):
         super().__init__("Recording", parent)
@@ -266,13 +288,11 @@ class RecordingPanel(QGroupBox):
         g = QGridLayout(self)
         g.setSpacing(6)
 
-        # Session name
         g.addWidget(QLabel("Session name:"), 0, 0)
         self._name_edit = QLineEdit("")
         self._name_edit.setPlaceholderText("e.g. IREC_2026_flight1")
         g.addWidget(self._name_edit, 0, 1, 1, 2)
 
-        # Output directory display + open button
         g.addWidget(QLabel("Output dir:"), 1, 0)
         rec_dir = os.path.abspath("recordings")
         self._dir_lbl = QLabel(rec_dir)
@@ -284,7 +304,6 @@ class RecordingPanel(QGroupBox):
         btn_open.clicked.connect(self._open_folder)
         g.addWidget(btn_open, 1, 2)
 
-        # Record / Stop buttons
         self._rec_btn = QPushButton("⏺  Record All")
         self._rec_btn.setObjectName("confirm")
         self._rec_btn.setToolTip(
@@ -298,7 +317,6 @@ class RecordingPanel(QGroupBox):
         self._stop_btn.clicked.connect(self._stop_all)
         g.addWidget(self._stop_btn, 2, 2)
 
-        # Per-stream status indicators
         self._s1v_lbl  = QLabel("S1 Video: idle"); self._s1v_lbl.setObjectName("rec_idle")
         self._s2v_lbl  = QLabel("S2 Video: idle"); self._s2v_lbl.setObjectName("rec_idle")
         self._data_lbl = QLabel("Data:     idle"); self._data_lbl.setObjectName("rec_idle")
@@ -306,7 +324,6 @@ class RecordingPanel(QGroupBox):
         g.addWidget(self._s2v_lbl,  4, 0, 1, 3)
         g.addWidget(self._data_lbl, 5, 0, 1, 3)
 
-        # Showcase mode toggle
         sep = QFrame(); sep.setFrameShape(QFrame.HLine); sep.setStyleSheet("color:#30363d;")
         g.addWidget(sep, 6, 0, 1, 3)
 
@@ -325,23 +342,20 @@ class RecordingPanel(QGroupBox):
     def _start_all(self):
         name = self._name_edit.text().strip()
 
-        # Start video recordings
         p1 = self._vid_s1.start_recording(name)
         p2 = self._vid_s2.start_recording(name)
 
-        # Start data recorder
         try:
             dp = self._data.start_recording(name)
             self._data_lbl.setText(f"Data:  ● {os.path.basename(dp)}")
             self._data_lbl.setObjectName("rec_active")
         except RuntimeError:
-            pass   # Already recording
+            pass
 
         self._rec_btn.setEnabled(False)
         self._rec_btn.setObjectName("")
         self._stop_btn.setEnabled(True)
 
-        # Update status labels (video labels are also updated via signals)
         if p1:
             self._s1v_lbl.setText(f"S1 Video: ● {os.path.basename(p1)}")
             self._s1v_lbl.setObjectName("rec_active")
@@ -407,7 +421,7 @@ class CommandPanel(QWidget):
     CMD_FIRE_SOLENOID   → Stage 2 ONLY, gated by TEST_IDLE mode
     """
 
-    full_sys_test_requested = pyqtSignal(list)  # emits list of stage ints e.g. [1], [2], [1,2]
+    full_sys_test_requested = pyqtSignal(list)
 
     def __init__(self, radio_s1: RadioWorker, radio_s2: RadioWorker,
                  data_recorder: DataRecorder, parent=None):
@@ -458,13 +472,11 @@ class CommandPanel(QWidget):
         layout.addWidget(sel)
 
         # ── 3. CAMERA CONTROLS ──────────────────────────────────
-        # RunCam internal SD recording — independent of VTX RF.
-        # Use in TEST_IDLE to verify recording works. Stop on PAD_IDLE transition.
         cg = QGroupBox("RunCam Recording  [stage selector]"); cgl = QGridLayout(cg)
-        cgl.addWidget(self._mkbtn("⏺  Record ON",
-                                  lambda: self._send(P.CMD_CAM_RECORD_ON),  "confirm"), 0, 0)
-        cgl.addWidget(self._mkbtn("⏹  Record OFF",
-                                  lambda: self._send(P.CMD_CAM_RECORD_OFF), "danger"),  0, 1)
+        self._cam_rec_on_btn  = self._mkbtn("⏺  Record ON",  lambda: self._send(P.CMD_CAM_RECORD_ON),  "confirm")
+        self._cam_rec_off_btn = self._mkbtn("⏹  Record OFF", lambda: self._send(P.CMD_CAM_RECORD_OFF), "danger")
+        cgl.addWidget(self._cam_rec_on_btn,  0, 0)
+        cgl.addWidget(self._cam_rec_off_btn, 0, 1)
         note = QLabel("Writes to RunCam SD. Independent of VTX RF.")
         note.setObjectName("telem_label"); note.setWordWrap(True)
         cgl.addWidget(note, 1, 0, 1, 2)
@@ -473,20 +485,23 @@ class CommandPanel(QWidget):
         # ── 4. VIDEO / VTX ──────────────────────────────────────
         vg = QGroupBox("Video / VTX"); vgl = QGridLayout(vg); vgl.setSpacing(4)
         vgl.addWidget(QLabel("RF:"), 0, 0)
-        vgl.addWidget(self._mkbtn("Video ON",  lambda: self._send(P.CMD_VIDEO_ON)),  0, 1)
-        vgl.addWidget(self._mkbtn("Video OFF", lambda: self._send(P.CMD_VIDEO_OFF)), 0, 2)
+        self._video_on_btn  = self._mkbtn("Video ON",  lambda: self._send(P.CMD_VIDEO_ON))
+        self._video_off_btn = self._mkbtn("Video OFF", lambda: self._send(P.CMD_VIDEO_OFF))
+        vgl.addWidget(self._video_on_btn,  0, 1)
+        vgl.addWidget(self._video_off_btn, 0, 2)
 
         vgl.addWidget(QLabel("S1 VTX MHz:"), 1, 0)
         self._vtx_s1_edit = QLineEdit(str(config.VTX_S1_FREQ_MHZ)); self._vtx_s1_edit.setMaximumWidth(65)
         vgl.addWidget(self._vtx_s1_edit, 1, 1)
-        vgl.addWidget(self._mkbtn("Set S1", lambda: self._send_vtx(1), "confirm"), 1, 2)
+        self._vtx_set_s1_btn = self._mkbtn("Set S1", lambda: self._send_vtx(1), "confirm")
+        vgl.addWidget(self._vtx_set_s1_btn, 1, 2)
 
         vgl.addWidget(QLabel("S2 VTX MHz:"), 2, 0)
         self._vtx_s2_edit = QLineEdit(str(config.VTX_S2_FREQ_MHZ)); self._vtx_s2_edit.setMaximumWidth(65)
         vgl.addWidget(self._vtx_s2_edit, 2, 1)
-        vgl.addWidget(self._mkbtn("Set S2", lambda: self._send_vtx(2), "confirm"), 2, 2)
+        self._vtx_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_vtx(2), "confirm")
+        vgl.addWidget(self._vtx_set_s2_btn, 2, 2)
 
-        # Per-stage VTX flight power — applied on LAUNCH_READY entry
         pwr_labels = ["25mW", "200mW", "500mW", "1W"]
         vgl.addWidget(QLabel("S1 Flt Pwr:"), 3, 0)
         self._vp_s1_btns = []
@@ -509,20 +524,26 @@ class CommandPanel(QWidget):
 
         # ── 5. TELEMETRY ────────────────────────────────────────
         tg = QGroupBox("Telemetry  [stage selector]"); tgl = QGridLayout(tg)
-        tgl.addWidget(self._mkbtn("10 Hz", lambda: self._send(P.CMD_TELEM_HIGH)), 0, 0)
-        tgl.addWidget(self._mkbtn(" 1 Hz", lambda: self._send(P.CMD_TELEM_LOW)),  0, 1)
-        tgl.addWidget(self._mkbtn("Force Pkt",  lambda: self._send(P.CMD_FORCE_PACKET)), 1, 0)
-        tgl.addWidget(self._mkbtn("Get Status", lambda: self._send(P.CMD_GET_STATUS)),   1, 1)
+        self._telem_10hz_btn = self._mkbtn("10 Hz",     lambda: self._send(P.CMD_TELEM_HIGH))
+        self._telem_1hz_btn  = self._mkbtn(" 1 Hz",     lambda: self._send(P.CMD_TELEM_LOW))
+        self._force_pkt_btn  = self._mkbtn("Force Pkt", lambda: self._send(P.CMD_FORCE_PACKET))
+        self._get_status_btn = self._mkbtn("Get Status",lambda: self._send(P.CMD_GET_STATUS))
+        tgl.addWidget(self._telem_10hz_btn, 0, 0)
+        tgl.addWidget(self._telem_1hz_btn,  0, 1)
+        tgl.addWidget(self._force_pkt_btn,  1, 0)
+        tgl.addWidget(self._get_status_btn, 1, 1)
 
         tgl.addWidget(QLabel("S1 LoRa MHz:"), 2, 0)
         self._lora_s1_edit = QLineEdit(f"{config.LORA_S1_FREQ_MHZ:.3f}"); self._lora_s1_edit.setMaximumWidth(75)
         tgl.addWidget(self._lora_s1_edit, 2, 1)
-        tgl.addWidget(self._mkbtn("Set S1", lambda: self._send_lora(1), "confirm"), 2, 2)
+        self._lora_set_s1_btn = self._mkbtn("Set S1", lambda: self._send_lora(1), "confirm")
+        tgl.addWidget(self._lora_set_s1_btn, 2, 2)
 
         tgl.addWidget(QLabel("S2 LoRa MHz:"), 3, 0)
         self._lora_s2_edit = QLineEdit(f"{config.LORA_S2_FREQ_MHZ:.3f}"); self._lora_s2_edit.setMaximumWidth(75)
         tgl.addWidget(self._lora_s2_edit, 3, 1)
-        tgl.addWidget(self._mkbtn("Set S2", lambda: self._send_lora(2), "confirm"), 3, 2)
+        self._lora_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_lora(2), "confirm")
+        tgl.addWidget(self._lora_set_s2_btn, 3, 2)
         layout.addWidget(tg)
 
         # ── 6. TEST / PAYLOAD ───────────────────────────────────
@@ -548,7 +569,6 @@ class CommandPanel(QWidget):
         fst = QGroupBox("Full System Test — Battery Evaluation")
         fstl = QGridLayout(fst); fstl.setSpacing(4)
 
-        # Warning label
         warn = QLabel(
             "⚡ Fires VTX + RunCam + 10Hz telem simultaneously for 90s.\n"
             "Stage 2: FIRES SOLENOID (one-shot — destructive test).\n"
@@ -559,16 +579,14 @@ class CommandPanel(QWidget):
         warn.setStyleSheet("color:#f0a500;")
         fstl.addWidget(warn, 0, 0, 1, 2)
 
-        # Test buttons
-        self._fst_s1_btn = self._mkbtn("▶  Run S1 Only", lambda: self._send_full_sys_test([1]), "sys_test")
-        self._fst_s2_btn = self._mkbtn("▶  Run S2 Only", lambda: self._send_full_sys_test([2]), "sys_test")
+        self._fst_s1_btn   = self._mkbtn("▶  Run S1 Only",      lambda: self._send_full_sys_test([1]),    "sys_test")
+        self._fst_s2_btn   = self._mkbtn("▶  Run S2 Only",      lambda: self._send_full_sys_test([2]),    "sys_test")
         self._fst_both_btn = self._mkbtn("▶▶  Run Both Stages", lambda: self._send_full_sys_test([1, 2]), "sys_test")
 
-        fstl.addWidget(self._fst_s1_btn, 1, 0)
-        fstl.addWidget(self._fst_s2_btn, 1, 1)
+        fstl.addWidget(self._fst_s1_btn,   1, 0)
+        fstl.addWidget(self._fst_s2_btn,   1, 1)
         fstl.addWidget(self._fst_both_btn, 2, 0, 1, 2)
 
-        # Countdown label
         self._fst_countdown = QLabel("Test: idle")
         self._fst_countdown.setObjectName("telem_label")
         fstl.addWidget(self._fst_countdown, 3, 0, 1, 2)
@@ -612,8 +630,6 @@ class CommandPanel(QWidget):
         sol_ok = s2_in_scope and (self._s2_ground_mode == P.GM_TEST_IDLE)
         self._sol_btn.setEnabled(sol_ok)
         self._sol_stage_lbl.setVisible(not s2_in_scope)
-
-        # Disable S2-only full system test button if S2 not in TEST_IDLE
         self._fst_s2_btn.setEnabled(self._s2_ground_mode == P.GM_TEST_IDLE)
 
     def _targets(self) -> list:
@@ -687,14 +703,6 @@ class CommandPanel(QWidget):
         if self._data.is_recording: self._data.record_event("CMD FIRE_SOLENOID → S2")
 
     def _send_full_sys_test(self, stages: list):
-        """
-        Send CMD_FULL_SYS_TEST to specified stages.
-
-        Checks:
-        - All stages must be in GM_TEST_IDLE
-        - If S2 included, show confirmation dialog (solenoid will fire)
-        """
-        # Check all stages are in TEST_IDLE
         not_ready = []
         for s in stages:
             mode = self._s1_ground_mode if s == 1 else self._s2_ground_mode
@@ -710,7 +718,6 @@ class CommandPanel(QWidget):
             )
             return
 
-        # S2 confirmation (solenoid will fire)
         if 2 in stages:
             reply = QMessageBox.question(
                 self, "Stage 2 Full System Test",
@@ -724,7 +731,6 @@ class CommandPanel(QWidget):
             if reply != QMessageBox.Yes:
                 return
 
-        # Send command to each stage
         for s in stages:
             radio = self._r1 if s == 1 else self._r2
             radio.send_frame(P.build_full_sys_test_frame(s))
@@ -732,11 +738,9 @@ class CommandPanel(QWidget):
             if self._data.is_recording:
                 self._data.record_event(f"CMD FULL_SYS_TEST → S{s}")
 
-        # Emit signal to MainWindow
         self.full_sys_test_requested.emit(stages)
 
     def set_test_countdown(self, text: str):
-        """Update the full system test countdown label."""
         self._fst_countdown.setText(text)
 
     # ------------------------------------------------------------------
@@ -770,7 +774,7 @@ class CommandPanel(QWidget):
 
     @property
     def test_mode(self) -> bool:
-        return False   # Legacy shim
+        return False
 
 
 class DebugConsole(QGroupBox):
@@ -790,68 +794,56 @@ class DebugConsole(QGroupBox):
 # =============================================================================
 
 class TestStatsPanel(QWidget):
-    """
-    Displays live packet reception statistics during full system test.
-    Two columns (S1 | S2) showing received packets, loss %, RSSI, temperature, etc.
-    Progress bar at bottom shows test countdown.
-    """
-
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setSpacing(4)
 
-        # Two column layout for S1 and S2 stats
         grid = QGridLayout()
         grid.setSpacing(6)
 
-        # Column headers
         s1_hdr = QLabel("Stage 1"); s1_hdr.setObjectName("state_label")
         s2_hdr = QLabel("Stage 2"); s2_hdr.setObjectName("state_label")
         grid.addWidget(s1_hdr, 0, 0)
         grid.addWidget(s2_hdr, 0, 1)
 
-        # S1 column widgets
-        self._s1_status = QLabel("Idle"); self._s1_status.setObjectName("telem_label")
-        self._s1_packets = QLabel("—"); self._s1_packets.setObjectName("telem_label")
-        self._s1_loss = QLabel("—"); self._s1_loss.setObjectName("telem_label")
-        self._s1_gaps = QLabel("—"); self._s1_gaps.setObjectName("telem_label")
-        self._s1_avg_rssi = QLabel("—"); self._s1_avg_rssi.setObjectName("telem_label")
-        self._s1_min_rssi = QLabel("—"); self._s1_min_rssi.setObjectName("telem_label")
-        self._s1_temp = QLabel("—"); self._s1_temp.setObjectName("telem_label")
-        self._s1_elapsed = QLabel("—"); self._s1_elapsed.setObjectName("telem_label")
+        self._s1_status  = QLabel("Idle"); self._s1_status.setObjectName("telem_label")
+        self._s1_packets = QLabel("—");    self._s1_packets.setObjectName("telem_label")
+        self._s1_loss    = QLabel("—");    self._s1_loss.setObjectName("telem_label")
+        self._s1_gaps    = QLabel("—");    self._s1_gaps.setObjectName("telem_label")
+        self._s1_avg_rssi= QLabel("—");    self._s1_avg_rssi.setObjectName("telem_label")
+        self._s1_min_rssi= QLabel("—");    self._s1_min_rssi.setObjectName("telem_label")
+        self._s1_temp    = QLabel("—");    self._s1_temp.setObjectName("telem_label")
+        self._s1_elapsed = QLabel("—");    self._s1_elapsed.setObjectName("telem_label")
 
-        # S2 column widgets
-        self._s2_status = QLabel("Idle"); self._s2_status.setObjectName("telem_label")
-        self._s2_packets = QLabel("—"); self._s2_packets.setObjectName("telem_label")
-        self._s2_loss = QLabel("—"); self._s2_loss.setObjectName("telem_label")
-        self._s2_gaps = QLabel("—"); self._s2_gaps.setObjectName("telem_label")
-        self._s2_avg_rssi = QLabel("—"); self._s2_avg_rssi.setObjectName("telem_label")
-        self._s2_min_rssi = QLabel("—"); self._s2_min_rssi.setObjectName("telem_label")
-        self._s2_temp = QLabel("—"); self._s2_temp.setObjectName("telem_label")
-        self._s2_elapsed = QLabel("—"); self._s2_elapsed.setObjectName("telem_label")
+        self._s2_status  = QLabel("Idle"); self._s2_status.setObjectName("telem_label")
+        self._s2_packets = QLabel("—");    self._s2_packets.setObjectName("telem_label")
+        self._s2_loss    = QLabel("—");    self._s2_loss.setObjectName("telem_label")
+        self._s2_gaps    = QLabel("—");    self._s2_gaps.setObjectName("telem_label")
+        self._s2_avg_rssi= QLabel("—");    self._s2_avg_rssi.setObjectName("telem_label")
+        self._s2_min_rssi= QLabel("—");    self._s2_min_rssi.setObjectName("telem_label")
+        self._s2_temp    = QLabel("—");    self._s2_temp.setObjectName("telem_label")
+        self._s2_elapsed = QLabel("—");    self._s2_elapsed.setObjectName("telem_label")
 
-        # Add rows to grid
         row = 1
-        grid.addWidget(self._s1_status, row, 0); grid.addWidget(self._s2_status, row, 1); row += 1
-        grid.addWidget(QLabel("Packets:"), row, 0, 1, 2); row += 1
+        grid.addWidget(self._s1_status,  row, 0); grid.addWidget(self._s2_status,  row, 1); row += 1
+        grid.addWidget(QLabel("Packets:"),row, 0, 1, 2); row += 1
         grid.addWidget(self._s1_packets, row, 0); grid.addWidget(self._s2_packets, row, 1); row += 1
-        grid.addWidget(QLabel("Loss:"), row, 0, 1, 2); row += 1
-        grid.addWidget(self._s1_loss, row, 0); grid.addWidget(self._s2_loss, row, 1); row += 1
-        grid.addWidget(QLabel("Gaps:"), row, 0, 1, 2); row += 1
-        grid.addWidget(self._s1_gaps, row, 0); grid.addWidget(self._s2_gaps, row, 1); row += 1
-        grid.addWidget(QLabel("Avg RSSI:"), row, 0, 1, 2); row += 1
-        grid.addWidget(self._s1_avg_rssi, row, 0); grid.addWidget(self._s2_avg_rssi, row, 1); row += 1
-        grid.addWidget(QLabel("Min RSSI:"), row, 0, 1, 2); row += 1
-        grid.addWidget(self._s1_min_rssi, row, 0); grid.addWidget(self._s2_min_rssi, row, 1); row += 1
-        grid.addWidget(QLabel("Temp Range:"), row, 0, 1, 2); row += 1
-        grid.addWidget(self._s1_temp, row, 0); grid.addWidget(self._s2_temp, row, 1); row += 1
-        grid.addWidget(QLabel("Elapsed:"), row, 0, 1, 2); row += 1
+        grid.addWidget(QLabel("Loss:"),   row, 0, 1, 2); row += 1
+        grid.addWidget(self._s1_loss,    row, 0); grid.addWidget(self._s2_loss,    row, 1); row += 1
+        grid.addWidget(QLabel("Gaps:"),   row, 0, 1, 2); row += 1
+        grid.addWidget(self._s1_gaps,    row, 0); grid.addWidget(self._s2_gaps,    row, 1); row += 1
+        grid.addWidget(QLabel("Avg RSSI:"),row, 0, 1, 2); row += 1
+        grid.addWidget(self._s1_avg_rssi,row, 0); grid.addWidget(self._s2_avg_rssi,row, 1); row += 1
+        grid.addWidget(QLabel("Min RSSI:"),row, 0, 1, 2); row += 1
+        grid.addWidget(self._s1_min_rssi,row, 0); grid.addWidget(self._s2_min_rssi,row, 1); row += 1
+        grid.addWidget(QLabel("Temp Range:"),row, 0, 1, 2); row += 1
+        grid.addWidget(self._s1_temp,    row, 0); grid.addWidget(self._s2_temp,    row, 1); row += 1
+        grid.addWidget(QLabel("Elapsed:"),row, 0, 1, 2); row += 1
         grid.addWidget(self._s1_elapsed, row, 0); grid.addWidget(self._s2_elapsed, row, 1); row += 1
 
         layout.addLayout(grid)
 
-        # Progress bar at bottom
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
@@ -860,47 +852,24 @@ class TestStatsPanel(QWidget):
         layout.addWidget(self._progress)
 
     def update_stats(self, stage: int, summary: dict):
-        """
-        Update statistics for one stage.
-
-        Args:
-            stage: 1 or 2
-            summary: dict from PacketStatsTracker.summary_dict()
-                     Keys: received, expected, loss_pct, gaps, avg_rssi,
-                           min_rssi, temp_min_c, temp_max_c, elapsed_s
-        """
         widgets = {
-            1: {
-                "packets": self._s1_packets,
-                "loss": self._s1_loss,
-                "gaps": self._s1_gaps,
-                "avg_rssi": self._s1_avg_rssi,
-                "min_rssi": self._s1_min_rssi,
-                "temp": self._s1_temp,
-                "elapsed": self._s1_elapsed,
-            },
-            2: {
-                "packets": self._s2_packets,
-                "loss": self._s2_loss,
-                "gaps": self._s2_gaps,
-                "avg_rssi": self._s2_avg_rssi,
-                "min_rssi": self._s2_min_rssi,
-                "temp": self._s2_temp,
-                "elapsed": self._s2_elapsed,
-            },
+            1: {"packets": self._s1_packets, "loss": self._s1_loss,
+                "gaps": self._s1_gaps, "avg_rssi": self._s1_avg_rssi,
+                "min_rssi": self._s1_min_rssi, "temp": self._s1_temp,
+                "elapsed": self._s1_elapsed},
+            2: {"packets": self._s2_packets, "loss": self._s2_loss,
+                "gaps": self._s2_gaps, "avg_rssi": self._s2_avg_rssi,
+                "min_rssi": self._s2_min_rssi, "temp": self._s2_temp,
+                "elapsed": self._s2_elapsed},
         }
-
         w = widgets.get(stage)
-        if not w:
-            return
+        if not w: return
 
         w["packets"].setText(f"{summary['received']} / {summary['expected']}")
-
         loss_pct = summary['loss_pct']
         loss_color = "#ff7b72" if loss_pct > 5.0 else "#3fb950"
         w["loss"].setText(f"{loss_pct:.1f}%")
         w["loss"].setStyleSheet(f"color:{loss_color};font-weight:bold;")
-
         w["gaps"].setText(str(summary['gaps']))
         w["avg_rssi"].setText(f"{summary['avg_rssi']:.1f} dBm")
         w["min_rssi"].setText(f"{summary['min_rssi']} dBm")
@@ -908,26 +877,16 @@ class TestStatsPanel(QWidget):
         w["elapsed"].setText(f"{summary['elapsed_s']:.0f}s")
 
     def set_status(self, stage: int, status_str: str):
-        """
-        Set the status label for a stage.
-
-        Args:
-            stage: 1 or 2
-            status_str: "Idle" / "Running…" / "Complete ✓"
-        """
         label = self._s1_status if stage == 1 else self._s2_status
         label.setText(status_str)
-
-        # Color coding
         if "Running" in status_str:
             label.setStyleSheet("color:#f0a500;font-weight:bold;")
         elif "Complete" in status_str:
             label.setStyleSheet("color:#3fb950;font-weight:bold;")
-        else:  # Idle
+        else:
             label.setStyleSheet("color:#8b949e;")
 
     def reset(self):
-        """Reset both columns to default Idle / — state."""
         for stage in [1, 2]:
             self.set_status(stage, "Idle")
             widgets = {
@@ -937,20 +896,11 @@ class TestStatsPanel(QWidget):
                     self._s2_avg_rssi, self._s2_min_rssi, self._s2_temp, self._s2_elapsed],
             }
             for w in widgets[stage]:
-                w.setText("—")
-                w.setStyleSheet("")
-
+                w.setText("—"); w.setStyleSheet("")
         self._progress.setValue(0)
         self._progress.setFormat("No test running")
 
     def set_progress(self, pct: int, label_str: str):
-        """
-        Update progress bar.
-
-        Args:
-            pct: 0–100
-            label_str: Text to display on progress bar
-        """
         self._progress.setValue(pct)
         self._progress.setFormat(label_str)
 
@@ -996,29 +946,22 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(config.APP_TITLE)
-        self.resize(1650, 950)
         if config.DARK_MODE:
             self.setStyleSheet(DARK_STYLE)
 
-        # Data recorder (shared by command panel and recording panel)
         self._data_rec = DataRecorder()
 
-        # Ground mode tracking — updated by _on_status_data from STATUS packets.
-        # Drives GPS gating (map only updates in LAUNCH_READY) and CommandPanel
-        # solenoid gate / mode indicator labels.
         self._s1_ground_mode = P.GM_TEST_IDLE
         self._s2_ground_mode = P.GM_TEST_IDLE
 
-        # Full system test tracking
         self._stats_s1 = PacketStatsTracker(stage=1, expected_rate_hz=10.0)
         self._stats_s2 = PacketStatsTracker(stage=2, expected_rate_hz=10.0)
         self._test_active_stages = []
         self._test_timer = QTimer(self)
-        self._test_timer.setInterval(1000)  # fires every second
+        self._test_timer.setInterval(1000)
         self._test_elapsed_s = 0
         self._test_timer_connected = False
 
-        # Workers
         self._radio_s1 = RadioWorker(1, config.M0_S1_PORT, config.M0_S1_BAUD)
         self._radio_s2 = RadioWorker(2, config.M0_S2_PORT, config.M0_S2_BAUD)
         self._gps_wkr  = FWGPSWorker(config.FW_GPS_PORT, config.FW_GPS_BAUD)
@@ -1029,112 +972,301 @@ class MainWindow(QMainWindow):
                                      config.VIDEO_WIDTH, config.VIDEO_HEIGHT,
                                      config.VIDEO_FPS)
 
-        # Showcase mode state
         self._showcase_active = config.SHOWCASE_MODE_DEFAULT
         self._showcase_worker: "VideoFileWorker | None" = None
         self._sc_status_slot = None
         self._sc_conn_slot   = None
 
+        self._log_window = None
+
         self._build_ui()
         self._wire_signals()
         self._start_workers()
+        self.showMaximized()
 
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        central = QWidget(); self.setCentralWidget(central)
-        root = QHBoxLayout(central); root.setSpacing(3); root.setContentsMargins(3,3,3,3)
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(2)
 
-        # Left: S1 telem + video
-        left = QVBoxLayout()
-        self._telem_s1 = TelemetryPanel(1)
-        self._video_s1 = VideoPanel(1)
-        left.addWidget(self._telem_s1, 2); left.addWidget(self._video_s1, 3)
-
-        # Centre: map
-        self._map = MapWidget(); self._map.setMinimumWidth(580)
-
-        # Right: S2 telem + video
-        right = QVBoxLayout()
-        self._telem_s2 = TelemetryPanel(2)
+        # ── Video panels ─────────────────────────────────────────────
         self._video_s2 = VideoPanel(2)
-        right.addWidget(self._telem_s2, 2); right.addWidget(self._video_s2, 3)
+        self._video_s1 = VideoPanel(1)
 
-        # Far right: command + recording (scrollable narrow strip)
-        side = QVBoxLayout(); side.setSpacing(4)
-        self._cmd_panel = CommandPanel(self._radio_s1, self._radio_s2,
-                                       self._data_rec)
+        # ── Map ──────────────────────────────────────────────────────
+        self._map = MapWidget()
+
+        # ── Live data (bottom right) ──────────────────────────────────
+        live_data = QWidget()
+        ld_layout = QVBoxLayout(live_data)
+        ld_layout.setSpacing(4)
+
+        telem_hdr = QLabel("LIVE TELEMETRY")
+        telem_hdr.setObjectName("section_header")
+        ld_layout.addWidget(telem_hdr)
+
+        telem_row = QHBoxLayout()
+        self._telem_s1 = TelemetryPanel(1)
+        self._telem_s2 = TelemetryPanel(2)
+        telem_row.addWidget(self._telem_s1, 1)
+        telem_row.addWidget(self._telem_s2, 1)
+        ld_layout.addLayout(telem_row)
+
+        self._gps_panel = GPSPanel()
+        ld_layout.addWidget(self._gps_panel)
+
+        # ── Splitter tree ─────────────────────────────────────────────
+        self._left_splitter = QSplitter(Qt.Vertical)
+        self._left_splitter.addWidget(self._video_s2)
+        self._left_splitter.addWidget(self._video_s1)
+
+        self._right_splitter = QSplitter(Qt.Vertical)
+        self._right_splitter.addWidget(self._map)
+        self._right_splitter.addWidget(live_data)
+
+        self._h_splitter = QSplitter(Qt.Horizontal)
+        self._h_splitter.addWidget(self._left_splitter)
+        self._h_splitter.addWidget(self._right_splitter)
+
+        self._outer_v_splitter = QSplitter(Qt.Vertical)
+        self._outer_v_splitter.addWidget(self._h_splitter)
+
+        root.addWidget(self._outer_v_splitter, 1)
+
+        # ── Command + Recording panels (instantiated; widgets extracted) ──
+        self._cmd_panel = CommandPanel(self._radio_s1, self._radio_s2, self._data_rec)
         self._cmd_panel.clear_tracks_btn.clicked.connect(self._map.clear_tracks)
         for key, btn in self._cmd_panel.site_btns.items():
             site = config.MAP_SITES[key]
             btn.clicked.connect(
                 lambda _=False, s=site: self._map.set_site(s["lat"], s["lon"], s["zoom"])
             )
-        self._rec_panel = RecordingPanel(self._vid_s1, self._vid_s2,
-                                         self._data_rec)
-        side.addWidget(self._cmd_panel, 3)
-        side.addWidget(self._rec_panel, 1)
+        self._rec_panel = RecordingPanel(self._vid_s1, self._vid_s2, self._data_rec)
 
-        side_widget = QWidget(); side_widget.setLayout(side)
-        side_widget.setFixedWidth(310)
-
-        # Bottom tabs
-        self._tabs = QTabWidget(); self._tabs.setMaximumHeight(220)
-        self._gps_panel = GPSPanel()
-        self._tabs.addTab(self._gps_panel, "Featherweight GPS")
+        # ── Debug + test stats (live even when log window is hidden) ──
         self._debug = DebugConsole()
-        self._tabs.addTab(self._debug, "Raw Serial Log")
         self._test_stats_panel = TestStatsPanel()
-        self._tabs.addTab(self._test_stats_panel, "System Test Stats")
 
-        # Assemble body
-        body = QHBoxLayout()
-        body.addLayout(left,   2)
-        body.addWidget(self._map, 5)
-        body.addLayout(right,  2)
-        body.addWidget(side_widget)
+        # ── Controls bar ──────────────────────────────────────────────
+        root.addWidget(self._build_controls_bar())
 
-        outer = QVBoxLayout(); outer.addLayout(body, 1); outer.addWidget(self._tabs)
-        root.addLayout(outer)
+        QTimer.singleShot(100, self._set_splitter_sizes)
+
+    # ------------------------------------------------------------------
+
+    def _build_controls_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(200)
+        bar_layout = QHBoxLayout(bar)
+        bar_layout.setSpacing(4)
+        bar_layout.setContentsMargins(6, 6, 6, 6)
+
+        # ── Group 1 — Ground Mode (210px) ────────────────────────────
+        g1 = QGroupBox("Ground Mode")
+        g1.setObjectName("controls_group")
+        g1.setFixedWidth(210)
+        g1l = QGridLayout(g1)
+        g1l.setSpacing(2)
+        g1l.addWidget(QLabel("S1:"),   0, 0)
+        g1l.addWidget(self._cmd_panel._gm_s1_test,   0, 1)
+        g1l.addWidget(self._cmd_panel._gm_s1_pad,    0, 2)
+        g1l.addWidget(self._cmd_panel._gm_s1_launch, 0, 3)
+        g1l.addWidget(QLabel("S2:"),   1, 0)
+        g1l.addWidget(self._cmd_panel._gm_s2_test,   1, 1)
+        g1l.addWidget(self._cmd_panel._gm_s2_pad,    1, 2)
+        g1l.addWidget(self._cmd_panel._gm_s2_launch, 1, 3)
+        g1l.addWidget(QLabel("Both:"), 2, 0)
+        g1l.addWidget(self._cmd_panel._gm_both_test,   2, 1)
+        g1l.addWidget(self._cmd_panel._gm_both_pad,    2, 2)
+        g1l.addWidget(self._cmd_panel._gm_both_launch, 2, 3)
+        g1l.addWidget(self._cmd_panel._gm_s1_ind, 3, 0, 1, 2)
+        g1l.addWidget(self._cmd_panel._gm_s2_ind, 3, 2, 1, 2)
+        bar_layout.addWidget(g1)
+
+        # ── Group 2 — Stage + Camera (170px) ─────────────────────────
+        g2 = QGroupBox("Stage / Camera")
+        g2.setObjectName("controls_group")
+        g2.setFixedWidth(170)
+        g2l = QGridLayout(g2)
+        g2l.setSpacing(2)
+        g2l.addWidget(self._cmd_panel._btn_s1,   0, 0)
+        g2l.addWidget(self._cmd_panel._btn_s2,   0, 1)
+        g2l.addWidget(self._cmd_panel._btn_both, 0, 2)
+        g2l.addWidget(self._cmd_panel._cam_rec_on_btn,  1, 0, 1, 2)
+        g2l.addWidget(self._cmd_panel._cam_rec_off_btn, 1, 2)
+        bar_layout.addWidget(g2)
+
+        # ── Group 3 — Video / VTX (230px) ────────────────────────────
+        g3 = QGroupBox("Video / VTX")
+        g3.setObjectName("controls_group")
+        g3.setFixedWidth(230)
+        g3l = QGridLayout(g3)
+        g3l.setSpacing(2)
+        g3l.addWidget(self._cmd_panel._video_on_btn,  0, 0)
+        g3l.addWidget(self._cmd_panel._video_off_btn, 0, 1)
+        g3l.addWidget(QLabel("S1 VTX:"),              1, 0)
+        g3l.addWidget(self._cmd_panel._vtx_s1_edit,   1, 1)
+        g3l.addWidget(self._cmd_panel._vtx_set_s1_btn, 1, 2)
+        g3l.addWidget(QLabel("S2 VTX:"),              2, 0)
+        g3l.addWidget(self._cmd_panel._vtx_s2_edit,   2, 1)
+        g3l.addWidget(self._cmd_panel._vtx_set_s2_btn, 2, 2)
+        s1_pwr = QHBoxLayout()
+        for b in self._cmd_panel._vp_s1_btns:
+            s1_pwr.addWidget(b)
+        g3l.addLayout(s1_pwr, 3, 0, 1, 3)
+        s2_pwr = QHBoxLayout()
+        for b in self._cmd_panel._vp_s2_btns:
+            s2_pwr.addWidget(b)
+        g3l.addLayout(s2_pwr, 4, 0, 1, 3)
+        bar_layout.addWidget(g3)
+
+        # ── Group 4 — Telemetry / LoRa (230px) ───────────────────────
+        g4 = QGroupBox("Telemetry")
+        g4.setObjectName("controls_group")
+        g4.setFixedWidth(230)
+        g4l = QGridLayout(g4)
+        g4l.setSpacing(2)
+        g4l.addWidget(self._cmd_panel._telem_10hz_btn, 0, 0)
+        g4l.addWidget(self._cmd_panel._telem_1hz_btn,  0, 1)
+        g4l.addWidget(self._cmd_panel._force_pkt_btn,  0, 2)
+        g4l.addWidget(self._cmd_panel._get_status_btn, 0, 3)
+        g4l.addWidget(QLabel("S1 LoRa:"),              1, 0)
+        g4l.addWidget(self._cmd_panel._lora_s1_edit,   1, 1)
+        g4l.addWidget(self._cmd_panel._lora_set_s1_btn, 1, 2)
+        g4l.addWidget(QLabel("S2 LoRa:"),              2, 0)
+        g4l.addWidget(self._cmd_panel._lora_s2_edit,   2, 1)
+        g4l.addWidget(self._cmd_panel._lora_set_s2_btn, 2, 2)
+        bar_layout.addWidget(g4)
+
+        # ── Group 5 — Test / Payload (210px) ─────────────────────────
+        g5 = QGroupBox("Test")
+        g5.setObjectName("controls_group")
+        g5.setFixedWidth(210)
+        g5l = QGridLayout(g5)
+        g5l.setSpacing(2)
+        g5l.addWidget(self._cmd_panel._sol_btn,       0, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._sol_stage_lbl, 1, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._fst_s1_btn,    2, 0)
+        g5l.addWidget(self._cmd_panel._fst_s2_btn,    2, 1)
+        g5l.addWidget(self._cmd_panel._fst_both_btn,  3, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._fst_countdown, 4, 0, 1, 2)
+        bar_layout.addWidget(g5)
+
+        # ── Group 6 — Recording + Showcase (200px) ───────────────────
+        g6 = QGroupBox("Recording")
+        g6.setObjectName("controls_group")
+        g6.setFixedWidth(200)
+        g6l = QGridLayout(g6)
+        g6l.setSpacing(2)
+        g6l.addWidget(self._rec_panel._name_edit, 0, 0, 1, 2)
+        g6l.addWidget(self._rec_panel._rec_btn,   1, 0)
+        g6l.addWidget(self._rec_panel._stop_btn,  1, 1)
+        g6l.addWidget(self._rec_panel._s1v_lbl,   2, 0, 1, 2)
+        g6l.addWidget(self._rec_panel._s2v_lbl,   3, 0, 1, 2)
+        g6l.addWidget(self._rec_panel._data_lbl,  4, 0, 1, 2)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color:#30363d;")
+        g6l.addWidget(sep, 5, 0, 1, 2)
+        g6l.addWidget(self._rec_panel._showcase_btn,    6, 0, 1, 2)
+        g6l.addWidget(self._rec_panel._showcase_status, 7, 0, 1, 2)
+        bar_layout.addWidget(g6)
+
+        # ── Group 7 — Log (120px) ─────────────────────────────────────
+        g7 = QGroupBox("Log")
+        g7.setObjectName("controls_group")
+        g7.setFixedWidth(120)
+        g7l = QVBoxLayout(g7)
+        g7l.setSpacing(2)
+        open_log_btn = QPushButton("📋  Open Log Window")
+        open_log_btn.setObjectName("confirm")
+        open_log_btn.clicked.connect(self._show_log_window)
+        g7l.addWidget(open_log_btn)
+        self._last_cmd_label = QLabel("—")
+        self._last_cmd_label.setObjectName("telem_label")
+        self._last_cmd_label.setWordWrap(True)
+        g7l.addWidget(self._last_cmd_label)
+        g7l.addStretch()
+        bar_layout.addWidget(g7)
+
+        return bar
+
+    # ------------------------------------------------------------------
+
+    def _set_splitter_sizes(self):
+        size = self.size()
+        w = size.width()
+        h = max(1, size.height() - 200 - 2)
+        self._h_splitter.setSizes([w // 2, w // 2])
+        self._left_splitter.setSizes([h // 2, h // 2])
+        self._right_splitter.setSizes([h // 2, h // 2])
+
+    def _show_log_window(self):
+        if self._log_window is not None:
+            if self._log_window.isVisible():
+                self._log_window.raise_()
+                self._log_window.activateWindow()
+            else:
+                self._log_window.show()
+            return
+
+        self._log_window = QMainWindow()
+        self._log_window.setWindowTitle("TRES Titan — System Log")
+        self._log_window.resize(900, 600)
+        if config.DARK_MODE:
+            self._log_window.setStyleSheet(DARK_STYLE)
+
+        cw = QWidget()
+        self._log_window.setCentralWidget(cw)
+        lw_layout = QVBoxLayout(cw)
+
+        tabs = QTabWidget()
+        tabs.addTab(self._debug, "Serial Log")
+        tabs.addTab(self._test_stats_panel, "Test Stats")
+        lw_layout.addWidget(tabs, 1)
+
+        close_btn = QPushButton("Close Log Window")
+        close_btn.clicked.connect(self._log_window.hide)
+        lw_layout.addWidget(close_btn)
+
+        self._log_window.show()
 
     # ------------------------------------------------------------------
 
     def _wire_signals(self):
-        # Flight data → telem panels + map + data recorder
         self._radio_s1.flight_data.connect(lambda s, d: self._telem_s1.update_flight(d))
         self._radio_s2.flight_data.connect(lambda s, d: self._telem_s2.update_flight(d))
         self._radio_s1.flight_data.connect(self._on_flight_data)
         self._radio_s2.flight_data.connect(self._on_flight_data)
 
-        # Status packets → telem panels
         self._radio_s1.status_data.connect(lambda s, d: self._telem_s1.update_status(d))
         self._radio_s2.status_data.connect(lambda s, d: self._telem_s2.update_status(d))
         self._radio_s1.status_data.connect(self._on_status_data)
         self._radio_s2.status_data.connect(self._on_status_data)
 
-        # ACKs → command panel
         self._radio_s1.ack_received.connect(self._cmd_panel.on_ack)
         self._radio_s2.ack_received.connect(self._cmd_panel.on_ack)
+        self._radio_s1.ack_received.connect(self._on_ack_label)
+        self._radio_s2.ack_received.connect(self._on_ack_label)
 
-        # Full system test → main window
         self._cmd_panel.full_sys_test_requested.connect(self._on_full_sys_test_requested)
 
-        # Connection status → telem panels
         self._radio_s1.connection_changed.connect(lambda s, c: self._telem_s1.set_connected(c))
         self._radio_s2.connection_changed.connect(lambda s, c: self._telem_s2.set_connected(c))
 
-        # Raw log → debug + command panel
         for r in [self._radio_s1, self._radio_s2]:
             r.raw_log.connect(lambda s, m: self._debug.append(m))
             r.raw_log.connect(self._cmd_panel.on_raw_log)
 
-        # GPS worker
         self._gps_wkr.position_update.connect(self._on_gps)
         self._gps_wkr.lost_rocket.connect(self._on_lost_rocket)
         self._gps_wkr.connection_changed.connect(self._gps_panel.set_connected)
         self._gps_wkr.raw_log.connect(self._debug.append)
 
-        # Video workers → panels + recording indicators
         self._vid_s1.frame_ready.connect(self._video_s1.update_frame)
         self._vid_s2.frame_ready.connect(self._video_s2.update_frame)
         self._vid_s1.status_message.connect(lambda s, m: self._video_s1.set_status(m))
@@ -1144,10 +1276,15 @@ class MainWindow(QMainWindow):
         self._vid_s2.recording_changed.connect(
             lambda s, a, p: self._video_s2.set_recording(a, p))
 
-        # Showcase mode
         self._rec_panel._showcase_btn.clicked.connect(self._toggle_showcase)
 
     # ------------------------------------------------------------------
+
+    @pyqtSlot(int, dict)
+    def _on_ack_label(self, stage: int, ack: dict):
+        result = "✅ OK" if ack["result"] == P.ACK_OK else "❌ REJECTED"
+        name = P.CMD_NAMES.get(ack["cmd"], f"0x{ack['cmd']:02X}")
+        self._last_cmd_label.setText(f"S{stage} {name}: {result}")
 
     @pyqtSlot(int, dict)
     @pyqtSlot(int, dict)
@@ -1158,14 +1295,12 @@ class MainWindow(QMainWindow):
         if self._data_rec.is_recording:
             self._data_rec.record_flight(stage, d)
 
-        # Record packet for system test tracking
         if stage in self._test_active_stages:
             tracker = self._stats_s1 if stage == 1 else self._stats_s2
             tracker.record_packet(d)
 
     @pyqtSlot(int, dict)
     def _on_status_data(self, stage: int, d: dict):
-        # Track per-stage ground modes — drives GPS gating and CommandPanel
         gm = d.get("ground_mode", P.GM_TEST_IDLE)
         if stage == 1:
             self._s1_ground_mode = gm
@@ -1178,10 +1313,6 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str, float, float, float, float, float)
     def _on_gps(self, name, lat, lon, alt_ft, vert_vel, horiz_vel):
-        # GPS GATING: only update map and panel in LAUNCH_READY.
-        # FWGPSWorker always runs but map/panel stay quiet in
-        # TEST_IDLE and PAD_IDLE — no value in showing position
-        # data until we have a genuine launch commitment.
         launch_ready = (self._s1_ground_mode == P.GM_LAUNCH_READY or
                         self._s2_ground_mode == P.GM_LAUNCH_READY)
         if not launch_ready:
@@ -1203,10 +1334,6 @@ class MainWindow(QMainWindow):
         if self._data_rec.is_recording:
             self._data_rec.record_gps(name, lat, lon, alt_ft, vert_vel, horiz_vel)
 
-
-        if self._data_rec.is_recording:
-            self._data_rec.record_gps(name, lat, lon, alt_ft, vert_vel, horiz_vel)
-
     @pyqtSlot(str, float, float, float)
     def _on_lost_rocket(self, name, lat, lon, alt_ft):
         self._map.show_lost_rocket(name, lat, lon, alt_ft)
@@ -1219,88 +1346,63 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(list)
     def _on_full_sys_test_requested(self, stages: list):
-        """
-        Called when user initiates a full system test.
-
-        Args:
-            stages: List of stage numbers [1], [2], or [1, 2]
-        """
         self._test_active_stages = stages
 
-        # Start packet tracking for each stage
         for stage in stages:
             tracker = self._stats_s1 if stage == 1 else self._stats_s2
             tracker.start()
             self._test_stats_panel.set_status(stage, "Running…")
 
-        # Auto-start recording if not already recording
         if not self._data_rec.is_recording:
             session_name = f"sysTest_{''.join('S'+str(s) for s in stages)}"
             self._rec_panel._name_edit.setText(session_name)
             self._rec_panel._start_all()
 
-        # Reset and switch to test stats tab
         self._test_stats_panel.reset()
-        # Switch to System Test Stats tab (index 2)
-        self._tabs.setCurrentIndex(2)
+        self._show_log_window()
+        if self._log_window:
+            self._log_window.centralWidget().layout().itemAt(0).widget().setCurrentIndex(1)
 
-        # Reset elapsed time
         self._test_elapsed_s = 0
 
-        # Connect timer (only once)
         if not self._test_timer_connected:
             self._test_timer.timeout.connect(self._on_test_tick)
             self._test_timer_connected = True
 
-        # Start timer
         self._test_timer.start()
 
         self._debug.append(f"[FULL SYS TEST] Started for stages: {stages}")
 
     def _on_test_tick(self):
-        """Called every second during full system test."""
         self._test_elapsed_s += 1
         duration = config.FULL_SYS_TEST_DURATION_S
 
-        # Update progress bar
         pct = min(100, int(self._test_elapsed_s / duration * 100))
         remaining = max(0, duration - self._test_elapsed_s)
         self._test_stats_panel.set_progress(pct, f"Running — {remaining}s remaining")
 
-        # Update countdown label in CommandPanel
         self._cmd_panel.set_test_countdown(f"Test: {self._test_elapsed_s}s / {duration}s")
 
-        # Update stats for each active stage
         for stage in self._test_active_stages:
             tracker = self._stats_s1 if stage == 1 else self._stats_s2
             summary = tracker.summary_dict()
             self._test_stats_panel.update_stats(stage, summary)
 
-        # Check if test is complete
         if self._test_elapsed_s >= duration:
             self._on_test_complete()
 
     def _on_test_complete(self):
-        """Called when full system test completes."""
-        # Stop timer
         self._test_timer.stop()
 
-        # Stop packet tracking for each stage
         for stage in self._test_active_stages:
             tracker = self._stats_s1 if stage == 1 else self._stats_s2
             tracker.stop()
             self._test_stats_panel.set_status(stage, "Complete ✓")
 
-        # Set progress to 100%
         self._test_stats_panel.set_progress(100, "Test complete")
-
-        # Update countdown label
         self._cmd_panel.set_test_countdown("Test: complete")
-
-        # Stop recording
         self._rec_panel._stop_all()
 
-        # Generate reports
         session_name = self._rec_panel._name_edit.text().strip()
         report_paths = []
         for stage in self._test_active_stages:
@@ -1312,7 +1414,6 @@ class MainWindow(QMainWindow):
             report_paths.append(report_path)
             self._debug.append(f"[FULL SYS TEST] Report saved: {report_path}")
 
-        # Show completion dialog
         QMessageBox.information(
             self, "Full System Test Complete",
             "Full System Test Complete\n\n"
@@ -1320,10 +1421,7 @@ class MainWindow(QMainWindow):
             "Check the System Test Stats tab for results."
         )
 
-        # Clear active stages
         self._test_active_stages = []
-
-    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     #  Showcase Mode
@@ -1350,7 +1448,6 @@ class MainWindow(QMainWindow):
                 "SHOWCASE_STAGE must be 1 or 2. Check config.py.")
             return
 
-        # Identify the live worker and panel for the showcase stage
         if config.SHOWCASE_STAGE == 1:
             old_worker = self._vid_s1
             panel      = self._video_s1
@@ -1358,11 +1455,9 @@ class MainWindow(QMainWindow):
             old_worker = self._vid_s2
             panel      = self._video_s2
 
-        # Stop live capture for this stage
         old_worker.stop()
         old_worker.wait(2000)
 
-        # Disconnect old worker's signals from panel
         try: old_worker.frame_ready.disconnect(panel.update_frame)
         except RuntimeError: pass
         try: old_worker.status_message.disconnect()
@@ -1372,7 +1467,6 @@ class MainWindow(QMainWindow):
         try: old_worker.connection_changed.disconnect()
         except RuntimeError: pass
 
-        # Create and wire the file worker
         self._showcase_worker = VideoFileWorker(
             config.SHOWCASE_STAGE,
             config.SHOWCASE_VIDEO_PATH,
@@ -1385,7 +1479,6 @@ class MainWindow(QMainWindow):
         self._showcase_worker.status_message.connect(self._sc_status_slot)
         self._showcase_worker.connection_changed.connect(self._sc_conn_slot)
 
-        # Redirect RecordingPanel so its no-op methods are called harmlessly
         if config.SHOWCASE_STAGE == 1:
             self._rec_panel._vid_s1 = self._showcase_worker
         else:
@@ -1393,7 +1486,6 @@ class MainWindow(QMainWindow):
 
         self._showcase_worker.start()
 
-        # Update UI
         self._showcase_active = True
         btn = self._rec_panel._showcase_btn
         btn.setText("🎬  Showcase Mode: ON — Click to Disable")
@@ -1411,7 +1503,6 @@ class MainWindow(QMainWindow):
 
             panel = self._video_s1 if config.SHOWCASE_STAGE == 1 else self._video_s2
 
-            # Disconnect showcase worker signals
             try: self._showcase_worker.frame_ready.disconnect(panel.update_frame)
             except RuntimeError: pass
             try:
@@ -1425,7 +1516,6 @@ class MainWindow(QMainWindow):
             try: self._showcase_worker.recording_changed.disconnect()
             except RuntimeError: pass
 
-            # Reconnect and restart the live capture worker
             if config.SHOWCASE_STAGE == 1:
                 live_worker = self._vid_s1
                 self._rec_panel._vid_s1 = live_worker
@@ -1458,12 +1548,13 @@ class MainWindow(QMainWindow):
             w.start()
 
     def closeEvent(self, event):
+        if self._log_window:
+            self._log_window.close()
         if self._showcase_active:
             self._stop_showcase()
         if self._showcase_worker:
             self._showcase_worker.stop()
             self._showcase_worker.wait(2000)
-        # Stop any active recording cleanly before exit
         if self._data_rec.is_recording:
             self._data_rec.stop_recording()
         for w in [self._radio_s1, self._radio_s2, self._gps_wkr,
