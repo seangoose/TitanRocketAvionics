@@ -149,57 +149,89 @@ class TelemetryPanel(QGroupBox):
         super().__init__(
             f"Stage {stage} — {'Booster' if stage == 1 else 'Sustainer'}", parent)
         self.stage = stage
-        self._setup()
 
-    def _setup(self):
-        g = QGridLayout(self)
-        g.setSpacing(4)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(4, 18, 4, 4)
+        outer.setSpacing(0)
 
-        def mkrow(label, row, attr, big=False):
-            lbl = QLabel(label); lbl.setObjectName("telem_label")
-            val = QLabel("—");   val.setObjectName("telem_value" if big else "telem_label")
-            setattr(self, attr, val)
-            g.addWidget(lbl, row, 0)
-            g.addWidget(val, row, 1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
 
-        mkrow("ALT",   0, "_alt")
-        mkrow("VEL",   1, "_vel")
-        mkrow("ACCEL", 2, "_accel")
-        mkrow("TEMP",  3, "_temp")
-        mkrow("RSSI",  4, "_rssi")
+        inner = QWidget()
+        inner.setMinimumWidth(340)
+        scroll.setWidget(inner)
+        self._setup(inner)
 
+    def _setup(self, parent):
+        g = QGridLayout(parent)
+        g.setHorizontalSpacing(10)
+        g.setVerticalSpacing(5)
+        g.setContentsMargins(6, 4, 6, 4)
+        # col 0 = label A, col 1 = value A, col 2 = label B, col 3 = value B
+        g.setColumnMinimumWidth(0, 70)
+        g.setColumnMinimumWidth(2, 80)
+        g.setColumnStretch(1, 2)
+        g.setColumnStretch(3, 2)
+
+        def lbl(text):
+            w = QLabel(text); w.setObjectName("telem_label"); return w
+
+        def val(attr, name="telem_label"):
+            w = QLabel("—"); w.setObjectName(name)
+            setattr(self, attr, w); return w
+
+        def sep(row):
+            f = QFrame(); f.setFrameShape(QFrame.HLine)
+            f.setStyleSheet("color:#21262d;"); g.addWidget(f, row, 0, 1, 4)
+
+        # ── Primary flight data ───────────────────────────────────────
+        g.addWidget(lbl("ALT"),   0, 0); g.addWidget(val("_alt",   "telem_value"), 0, 1, 1, 3)
+        g.addWidget(lbl("VEL"),   1, 0); g.addWidget(val("_vel",   "telem_value"), 1, 1, 1, 3)
+        g.addWidget(lbl("ACCEL"), 2, 0); g.addWidget(val("_accel", "telem_value"), 2, 1, 1, 3)
+        g.addWidget(lbl("TEMP"),  3, 0); g.addWidget(val("_temp"), 3, 1)
+        g.addWidget(lbl("RSSI"),  3, 2); g.addWidget(val("_rssi"), 3, 3)
+
+        sep(4)
+
+        # ── State / faults / mode ─────────────────────────────────────
+        g.addWidget(lbl("STATE"), 5, 0)
         self._state = QLabel("—"); self._state.setObjectName("state_label")
-        g.addWidget(QLabel("STATE"), 5, 0)
-        g.addWidget(self._state,     5, 1, 1, 3)
+        g.addWidget(self._state, 5, 1, 1, 3)
 
         self._fault = QLabel("Faults: None"); self._fault.setObjectName("fault_ok")
         g.addWidget(self._fault, 6, 0, 1, 4)
 
-        self._gmode = QLabel("MODE: —")
-        self._gmode.setObjectName("state_label")
-        g.addWidget(QLabel("GROUND MODE"), 7, 0)
+        g.addWidget(lbl("MODE"), 7, 0)
+        self._gmode = QLabel("—"); self._gmode.setObjectName("state_label")
         g.addWidget(self._gmode, 7, 1, 1, 3)
 
-        for attr, text, row, col in [
-            ("_lora",  "LoRa: — MHz",    8, 0),
-            ("_vtx",   "VTX: — MHz",     8, 2),
-            ("_trate", "Telem: — Hz",    9, 0),
-            ("_vpwr",  "VTX cur: —",     9, 2),
-            ("_vfpwr", "VTX flt: —",    10, 0),
-            ("_video", "Video: —",       10, 2),
-            ("_camrec","Cam: idle",      11, 0),
-            ("_testm", "Test: off",      11, 2),
-        ]:
-            w = QLabel(text); w.setObjectName("telem_label")
-            setattr(self, attr, w)
-            g.addWidget(w, row, col, 1, 2)
+        sep(8)
+
+        # ── Radio / config ────────────────────────────────────────────
+        g.addWidget(lbl("LoRa"),    9, 0); g.addWidget(val("_lora"),   9, 1)
+        g.addWidget(lbl("VTX"),     9, 2); g.addWidget(val("_vtx"),    9, 3)
+
+        g.addWidget(lbl("Telem"),  10, 0); g.addWidget(val("_trate"), 10, 1)
+        g.addWidget(lbl("VTX pwr"),10, 2); g.addWidget(val("_vpwr"),  10, 3)
+
+        g.addWidget(lbl("Flt pwr"),11, 0); g.addWidget(val("_vfpwr"), 11, 1)
+        g.addWidget(lbl("Video"),  11, 2); g.addWidget(val("_video"),  11, 3)
+
+        g.addWidget(lbl("Cam"),    12, 0); g.addWidget(val("_camrec"), 12, 1)
+        g.addWidget(lbl("Test"),   12, 2); g.addWidget(val("_testm"),  12, 3)
+
+        sep(13)
 
         self._conn = QLabel("⚫ Disconnected")
         self._conn.setObjectName("status_err")
-        g.addWidget(self._conn, 12, 0, 1, 4)
+        g.addWidget(self._conn, 14, 0, 1, 4)
 
         self._ts = QLabel("Last: —"); self._ts.setObjectName("telem_label")
-        g.addWidget(self._ts, 13, 0, 1, 4)
+        g.addWidget(self._ts, 15, 0, 1, 4)
 
     def update_flight(self, d: dict):
         stage = d.get("stage", self.stage)
