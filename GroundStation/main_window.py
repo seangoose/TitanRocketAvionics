@@ -1509,19 +1509,40 @@ class MainWindow(QMainWindow):
     #  Showcase Mode
     # ------------------------------------------------------------------
 
+    def _resolve_showcase_video(self) -> str:
+        """Return the video file path to play. If SHOWCASE_VIDEO_PATH is a
+        directory, returns the first .mp4/.avi/.mkv/.mov found inside it."""
+        p = config.SHOWCASE_VIDEO_PATH
+        if not p:
+            return ""
+        if os.path.isdir(p):
+            for fname in sorted(os.listdir(p)):
+                if fname.lower().endswith((".mp4", ".avi", ".mkv", ".mov")):
+                    return os.path.join(p, fname)
+            return ""
+        return p
+
     def _update_showcase_btn_state(self):
-        """Grey out showcase button when no video path is configured."""
+        """Grey out showcase button when no video is available."""
         btn = self._rec_panel._showcase_btn
         lbl = self._rec_panel._showcase_status
-        if not config.SHOWCASE_VIDEO_PATH:
+        video = self._resolve_showcase_video()
+        if not video:
             btn.setEnabled(False)
-            btn.setToolTip("Set SHOWCASE_VIDEO_PATH in config.py to enable showcase mode.")
-            lbl.setText("Showcase: no video path set")
+            if config.SHOWCASE_VIDEO_PATH and os.path.isdir(config.SHOWCASE_VIDEO_PATH):
+                btn.setToolTip(
+                    f"No video found in {config.SHOWCASE_VIDEO_PATH}\n"
+                    "Drop an .mp4/.avi/.mkv/.mov file into that folder.")
+                lbl.setText("Showcase: folder empty — add a video file")
+            else:
+                btn.setToolTip("Set SHOWCASE_VIDEO_PATH in config.py to enable showcase mode.")
+                lbl.setText("Showcase: no video path set")
         else:
             btn.setEnabled(True)
             btn.setToolTip(
-                f"Play {os.path.basename(config.SHOWCASE_VIDEO_PATH)} on S{config.SHOWCASE_STAGE} panel.\n"
+                f"Play {os.path.basename(video)} on S{config.SHOWCASE_STAGE} panel.\n"
                 "Live capture continues on the other panel.")
+            lbl.setText(f"Showcase: ready — {os.path.basename(video)}")
 
     def _toggle_showcase(self):
         if not self._showcase_active:
@@ -1534,8 +1555,9 @@ class MainWindow(QMainWindow):
             self._stop_showcase()
 
     def _start_showcase(self):
-        if not config.SHOWCASE_VIDEO_PATH:
-            return   # button is disabled when path unset; guard only
+        video_path = self._resolve_showcase_video()
+        if not video_path:
+            return   # button is disabled when no video; guard only
         if config.SHOWCASE_STAGE not in (1, 2):
             QMessageBox.warning(self, "Showcase Mode",
                 "SHOWCASE_STAGE must be 1 or 2. Check config.py.")
@@ -1562,7 +1584,7 @@ class MainWindow(QMainWindow):
 
         self._showcase_worker = VideoFileWorker(
             config.SHOWCASE_STAGE,
-            config.SHOWCASE_VIDEO_PATH,
+            video_path,
             config.SHOWCASE_FRAME_DELAY_MS
         )
         self._showcase_worker.frame_ready.connect(panel.update_frame)

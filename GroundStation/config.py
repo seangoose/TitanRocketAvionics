@@ -136,6 +136,7 @@ STAGE_NAMES = {1: "Stage 1 (Booster)", 2: "Stage 2 (Sustainer)"}
 
 SHOWCASE_MODE_DEFAULT   = False         # Start in showcase mode on launch
 SHOWCASE_STAGE          = 1            # Which stage panel plays the file (1 or 2)
-SHOWCASE_VIDEO_PATH     = ""           # Absolute path to showcase video file
-                                        # e.g. "/home/pi/showcase/TRES_highlight.mp4"
+SHOWCASE_VIDEO_PATH     = "/home/titanrocket/TitanRocketAvionics/GroundStation/showcase"
+                                        # Path to a video file OR a folder — if a folder,
+                                        # the first .mp4/.avi/.mkv/.mov file found is played.
 SHOWCASE_FRAME_DELAY_MS = 33           # ~30 fps playback (match your video's frame rate)
