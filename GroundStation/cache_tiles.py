@@ -1,34 +1,27 @@
 #!/usr/bin/env python3
 # =============================================================================
 #  TRES Titan Ground Station — cache_tiles.py
-#  Pre-downloads map tiles for a launch site area for offline use.
+#  Pre-downloads map tiles for one or more launch sites for offline use.
 #
 #  Run this at home on WiFi BEFORE driving to the competition site:
-#      python3 cache_tiles.py
+#      python3 cache_tiles.py              # downloads all sites in MAP_SITES
+#      python3 cache_tiles.py CSUF MDARS  # downloads named sites only
 #
 #  Tiles are saved to tile_cache/{z}/{x}/{y}.png and served by the
 #  map.html Leaflet "Offline Cache" tile layer.
-#
-#  Default area: FAR (Friends of Amateur Rocketry), Mojave CA.
-#  Edit LAT, LON, and RADIUS_KM in config.py to match your launch site.
-#  Zoom levels 10–17 cover region overview through street-level detail.
-#  ~500 tiles at zoom 10–15, ~4000 tiles at zoom 10–17.
 # =============================================================================
 
 import os
+import sys
 import math
 import time
 import requests
-from config import MAP_CENTER_LAT, MAP_CENTER_LON, TILE_CACHE_DIR
+from config import MAP_SITES, TILE_CACHE_DIR
 
 # ── CONFIGURATION ──────────────────────────────────────────────────────────
 TILE_URL    = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-SUBDOMAINS  = ["a", "b", "c"]   # OSM tile servers
+SUBDOMAINS  = ["a", "b", "c"]
 MIN_ZOOM    = 10
-MAX_ZOOM    = 17
-# Bounding box margin around center (degrees)
-# ~0.15 degrees ≈ 16 km at Mojave latitude
-MARGIN_DEG  = 0.15
 DELAY_S     = 0.05              # Rate limit: 20 tiles/second max (OSM policy)
 HEADERS     = {
     "User-Agent": "TRES-CSUF-GroundStation/1.0 (tres.csuf@gmail.com)"
@@ -37,7 +30,6 @@ HEADERS     = {
 
 
 def deg2tile(lat_deg: float, lon_deg: float, zoom: int) -> tuple:
-    """Convert lat/lon decimal degrees to tile x/y at a given zoom level."""
     lat_rad = math.radians(lat_deg)
     n = 2 ** zoom
     x = int((lon_deg + 180.0) / 360.0 * n)
@@ -46,24 +38,29 @@ def deg2tile(lat_deg: float, lon_deg: float, zoom: int) -> tuple:
 
 
 def tile_bounds(lat: float, lon: float, margin: float, zoom: int) -> tuple:
-    """Return (x_min, y_min, x_max, y_max) tile range for the given area."""
     x1, y1 = deg2tile(lat + margin, lon - margin, zoom)
     x2, y2 = deg2tile(lat - margin, lon + margin, zoom)
     return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
 
 
-def download_tiles():
-    os.makedirs(TILE_CACHE_DIR, exist_ok=True)
-    total    = 0
-    skipped  = 0
-    failed   = 0
-    sd_idx   = 0
+def download_site(key: str, site: dict) -> tuple:
+    """Download tiles for one site. Returns (downloaded, skipped, failed)."""
+    lat      = site["lat"]
+    lon      = site["lon"]
+    margin   = site.get("margin", 0.10)
+    max_zoom = site.get("max_zoom", 17)
 
-    for zoom in range(MIN_ZOOM, MAX_ZOOM + 1):
-        x_min, y_min, x_max, y_max = tile_bounds(
-            MAP_CENTER_LAT, MAP_CENTER_LON, MARGIN_DEG, zoom)
+    total   = 0
+    skipped = 0
+    failed  = 0
+    sd_idx  = 0
+
+    os.makedirs(TILE_CACHE_DIR, exist_ok=True)
+
+    for zoom in range(MIN_ZOOM, max_zoom + 1):
+        x_min, y_min, x_max, y_max = tile_bounds(lat, lon, margin, zoom)
         count = (x_max - x_min + 1) * (y_max - y_min + 1)
-        print(f"\nZoom {zoom}: {count} tiles "
+        print(f"  Zoom {zoom:2d}: {count:5d} tiles  "
               f"(x {x_min}–{x_max}, y {y_min}–{y_max})")
 
         for x in range(x_min, x_max + 1):
@@ -76,7 +73,6 @@ def download_tiles():
                     skipped += 1
                     continue
 
-                # Round-robin across OSM subdomains to spread load
                 sub = SUBDOMAINS[sd_idx % len(SUBDOMAINS)]
                 sd_idx += 1
                 url = (TILE_URL
@@ -90,25 +86,53 @@ def download_tiles():
                         with open(out_path, "wb") as f:
                             f.write(resp.content)
                         total += 1
-                        print(f"  ✓ {zoom}/{x}/{y}", end="\r")
+                        print(f"    ✓ {zoom}/{x}/{y}  "
+                              f"[+{total} cached]", end="\r")
                     else:
                         failed += 1
-                        print(f"  ✗ HTTP {resp.status_code}: {url}")
+                        print(f"\n    ✗ HTTP {resp.status_code}: {url}")
                 except requests.RequestException as e:
                     failed += 1
-                    print(f"  ✗ {e}")
+                    print(f"\n    ✗ {e}")
 
                 time.sleep(DELAY_S)
 
-    print(f"\n\nDone. Downloaded: {total}  Skipped (cached): {skipped}  "
-          f"Failed: {failed}")
-    print(f"Tile cache: {os.path.abspath(TILE_CACHE_DIR)}")
+    print()  # newline after final \r
+    return total, skipped, failed
 
 
 if __name__ == "__main__":
+    # Determine which sites to download
+    requested = [a.upper() for a in sys.argv[1:]]
+    if requested:
+        sites = {k: v for k, v in MAP_SITES.items() if k in requested}
+        unknown = set(requested) - set(MAP_SITES)
+        if unknown:
+            print(f"Unknown site(s): {', '.join(unknown)}")
+            print(f"Available: {', '.join(MAP_SITES)}")
+            sys.exit(1)
+    else:
+        sites = MAP_SITES
+
     print("TRES Ground Station — Tile Cache Download")
-    print(f"Center: {MAP_CENTER_LAT}°N, {MAP_CENTER_LON}°E")
-    print(f"Zoom:   {MIN_ZOOM}–{MAX_ZOOM}")
-    print(f"Cache:  {os.path.abspath(TILE_CACHE_DIR)}")
+    print(f"Cache dir: {os.path.abspath(TILE_CACHE_DIR)}")
+    print(f"Sites:     {', '.join(sites)}")
     print()
-    download_tiles()
+
+    grand_total = grand_skip = grand_fail = 0
+
+    for key, site in sites.items():
+        print(f"━━━  {key} — {site['name']}  "
+              f"({site['lat']:.4f}, {site['lon']:.4f})  "
+              f"margin={site.get('margin',0.10)}°  "
+              f"zoom {MIN_ZOOM}–{site.get('max_zoom',17)}")
+        dl, sk, fa = download_site(key, site)
+        grand_total += dl
+        grand_skip  += sk
+        grand_fail  += fa
+        print(f"  → Downloaded: {dl}  Skipped (cached): {sk}  Failed: {fa}\n")
+
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(f"All done.  Downloaded: {grand_total}  "
+          f"Skipped: {grand_skip}  Failed: {grand_fail}")
+    print(f"Cache: {os.path.abspath(TILE_CACHE_DIR)}")
