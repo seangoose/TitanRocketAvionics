@@ -58,7 +58,8 @@ QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
 QPushButton {
     background-color: #21262d; border: 1px solid #30363d;
     border-radius: 4px; color: #c9d1d9;
-    padding: 6px 12px; font-size: 11px;
+    padding: 6px 18px; font-size: 11px;
+    min-width: 70px;
 }
 QPushButton:hover   { background-color: #30363d; }
 QPushButton:pressed { background-color: #388bfd; color: #fff; }
@@ -1042,24 +1043,32 @@ class MainWindow(QMainWindow):
         self._map = MapWidget()
         self._map.setMinimumHeight(320)
 
-        # ── Live data (bottom right) — telem stacked vertically ───────
-        live_data = QWidget()
-        live_data.setMinimumHeight(320)
-        ld_layout = QVBoxLayout(live_data)
-        ld_layout.setSpacing(3)
-        ld_layout.setContentsMargins(2, 2, 2, 2)
+        # ── GPS panel (bottom right) ──────────────────────────────────
+        self._gps_panel = GPSPanel()
+        gps_container = QWidget()
+        gps_container.setMinimumHeight(320)
+        gps_vbox = QVBoxLayout(gps_container)
+        gps_vbox.setContentsMargins(2, 2, 2, 2)
+        gps_vbox.setSpacing(3)
+        gps_hdr = QLabel("GPS MAP")
+        gps_hdr.setObjectName("section_header")
+        gps_vbox.addWidget(gps_hdr)
+        gps_vbox.addWidget(self._map, 1)
+        gps_vbox.addWidget(self._gps_panel)
 
+        # ── Telemetry (top right) — S1 above S2 ──────────────────────
+        telem_container = QWidget()
+        telem_container.setMinimumHeight(320)
+        tc_layout = QVBoxLayout(telem_container)
+        tc_layout.setContentsMargins(2, 2, 2, 2)
+        tc_layout.setSpacing(3)
         telem_hdr = QLabel("LIVE TELEMETRY")
         telem_hdr.setObjectName("section_header")
-        ld_layout.addWidget(telem_hdr)
-
+        tc_layout.addWidget(telem_hdr)
         self._telem_s1 = TelemetryPanel(1)
         self._telem_s2 = TelemetryPanel(2)
-        ld_layout.addWidget(self._telem_s1, 1)
-        ld_layout.addWidget(self._telem_s2, 1)
-
-        self._gps_panel = GPSPanel()
-        ld_layout.addWidget(self._gps_panel)
+        tc_layout.addWidget(self._telem_s1, 1)
+        tc_layout.addWidget(self._telem_s2, 1)
 
         # ── Splitter tree ─────────────────────────────────────────────
         self._left_splitter = QSplitter(Qt.Vertical)
@@ -1067,8 +1076,8 @@ class MainWindow(QMainWindow):
         self._left_splitter.addWidget(self._video_s1)
 
         self._right_splitter = QSplitter(Qt.Vertical)
-        self._right_splitter.addWidget(self._map)
-        self._right_splitter.addWidget(live_data)
+        self._right_splitter.addWidget(telem_container)
+        self._right_splitter.addWidget(gps_container)
 
         self._h_splitter = QSplitter(Qt.Horizontal)
         self._h_splitter.addWidget(self._left_splitter)
@@ -1115,7 +1124,6 @@ class MainWindow(QMainWindow):
         # ── Group 1 — Ground Mode (210px) ────────────────────────────
         g1 = QGroupBox("Ground Mode")
         g1.setObjectName("controls_group")
-        g1.setFixedWidth(210)
         g1l = QGridLayout(g1)
         g1l.setSpacing(2)
         g1l.addWidget(QLabel("S1:"),   0, 0)
@@ -1137,7 +1145,6 @@ class MainWindow(QMainWindow):
         # ── Group 2 — Stage + Camera (170px) ─────────────────────────
         g2 = QGroupBox("Stage / Camera")
         g2.setObjectName("controls_group")
-        g2.setFixedWidth(170)
         g2l = QGridLayout(g2)
         g2l.setSpacing(2)
         g2l.addWidget(self._cmd_panel._btn_s1,   0, 0)
@@ -1150,7 +1157,6 @@ class MainWindow(QMainWindow):
         # ── Group 3 — Video / VTX (260px) ────────────────────────────
         g3 = QGroupBox("Video / VTX")
         g3.setObjectName("controls_group")
-        g3.setFixedWidth(260)
         g3l = QGridLayout(g3)
         g3l.setSpacing(2)
         g3l.addWidget(self._cmd_panel._video_on_btn,  0, 0)
@@ -1174,7 +1180,6 @@ class MainWindow(QMainWindow):
         # ── Group 4 — Telemetry / LoRa (230px) ───────────────────────
         g4 = QGroupBox("Telemetry")
         g4.setObjectName("controls_group")
-        g4.setFixedWidth(230)
         g4l = QGridLayout(g4)
         g4l.setSpacing(2)
         g4l.addWidget(self._cmd_panel._telem_10hz_btn, 0, 0)
@@ -1192,7 +1197,6 @@ class MainWindow(QMainWindow):
         # ── Group 5 — Test / Payload (210px) ─────────────────────────
         g5 = QGroupBox("Test")
         g5.setObjectName("controls_group")
-        g5.setFixedWidth(210)
         g5l = QGridLayout(g5)
         g5l.setSpacing(2)
         g5l.addWidget(self._cmd_panel._sol_btn,       0, 0, 1, 2)
@@ -1206,7 +1210,6 @@ class MainWindow(QMainWindow):
         # ── Group 6 — Recording + Showcase (200px) ───────────────────
         g6 = QGroupBox("Recording")
         g6.setObjectName("controls_group")
-        g6.setFixedWidth(200)
         g6l = QGridLayout(g6)
         g6l.setSpacing(2)
         g6l.addWidget(self._rec_panel._name_edit, 0, 0, 1, 2)
@@ -1226,7 +1229,6 @@ class MainWindow(QMainWindow):
         # ── Group 7 — Log (120px) ─────────────────────────────────────
         g7 = QGroupBox("Log")
         g7.setObjectName("controls_group")
-        g7.setFixedWidth(120)
         g7l = QVBoxLayout(g7)
         g7l.setSpacing(2)
         open_log_btn = QPushButton("📋  Open Log Window")
