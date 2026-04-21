@@ -11,17 +11,17 @@
 # -----------------------------------------------------------------------------
 
 # Adafruit M0 LoRa radio — Stage 1 uplink/downlink
-M0_S1_PORT     = "/dev/ttyUSB0"
+M0_S1_PORT     = "/dev/tres_m0_s1"
 M0_S1_BAUD     = 115200
 
 # Adafruit M0 LoRa radio — Stage 2 uplink/downlink
-M0_S2_PORT     = "/dev/ttyUSB1"
+M0_S2_PORT     = "/dev/tres_m0_s2"
 M0_S2_BAUD     = 115200
 
 # Featherweight GPS Ground Station V2 — USB serial
 # Baud rate: 57600 per Featherweight documentation (Appendix A).
 # Verify against your unit's serial output if packets appear garbled.
-FW_GPS_PORT    = "/dev/ttyACM0"
+FW_GPS_PORT    = "/dev/tres_fw_gps"
 FW_GPS_BAUD    = 57600
 
 # -----------------------------------------------------------------------------

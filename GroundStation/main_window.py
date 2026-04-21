@@ -780,8 +780,8 @@ class CommandPanel(QWidget):
         result = "✅ OK" if ack["result"] == P.ACK_OK else "❌ REJECTED"
         self._log_msg(result, ack["cmd"], stage, f"← ACK from S{stage}")
 
-    @pyqtSlot(str)
-    def on_raw_log(self, msg: str):
+    @pyqtSlot(int, str)
+    def on_raw_log(self, _stage: int, msg: str):
         if any(kw in msg for kw in ["CMD","ACK","SENT","ERROR","BLOCKED","MODE","RETUNE","RADIO","HEARTBEAT"]):
             self._append(msg)
 
