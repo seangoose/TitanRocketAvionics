@@ -165,8 +165,10 @@ class VideoWorker(QThread):
             self.connection_changed.emit(self.stage, True)
             self.status_message.emit(self.stage,
                 f"S{self.stage} Camera: {actual_w}×{actual_h} "
-                f"@ {actual_fps:.0f} fps  (/dev/video{self.device_index})")
+                f"@ {actual_fps:.0f} fps  (/dev/video{self.device_index})"
+                f" — waiting for signal…")
 
+            _no_signal_frames = 0
             while self._running:
                 ret, frame = cap.read()
                 if not ret:
@@ -174,6 +176,22 @@ class VideoWorker(QThread):
                     self.status_message.emit(self.stage,
                         f"S{self.stage} Camera: capture failed — reopening…")
                     break
+
+                # Detect black/no-signal frames (mean brightness < 3/255)
+                import numpy as np
+                is_black = (np.mean(frame) < 3.0)
+                if is_black:
+                    _no_signal_frames += 1
+                    if _no_signal_frames == 30:   # ~0.5s of black frames
+                        self.status_message.emit(self.stage,
+                            f"S{self.stage} Camera: connected — no signal "
+                            f"(/dev/video{self.device_index})")
+                else:
+                    if _no_signal_frames >= 30:
+                        self.status_message.emit(self.stage,
+                            f"S{self.stage} Camera: {actual_w}×{actual_h} "
+                            f"@ {actual_fps:.0f} fps — live")
+                    _no_signal_frames = 0
 
                 # ── Write to disk if recording ────────────────────────
                 with self._rec_lock:

@@ -1326,6 +1326,7 @@ class MainWindow(QMainWindow):
             lambda s, a, p: self._video_s2.set_recording(a, p))
 
         self._rec_panel._showcase_btn.clicked.connect(self._toggle_showcase)
+        self._update_showcase_btn_state()
 
     # ------------------------------------------------------------------
 
@@ -1476,6 +1477,20 @@ class MainWindow(QMainWindow):
     #  Showcase Mode
     # ------------------------------------------------------------------
 
+    def _update_showcase_btn_state(self):
+        """Grey out showcase button when no video path is configured."""
+        btn = self._rec_panel._showcase_btn
+        lbl = self._rec_panel._showcase_status
+        if not config.SHOWCASE_VIDEO_PATH:
+            btn.setEnabled(False)
+            btn.setToolTip("Set SHOWCASE_VIDEO_PATH in config.py to enable showcase mode.")
+            lbl.setText("Showcase: no video path set")
+        else:
+            btn.setEnabled(True)
+            btn.setToolTip(
+                f"Play {os.path.basename(config.SHOWCASE_VIDEO_PATH)} on S{config.SHOWCASE_STAGE} panel.\n"
+                "Live capture continues on the other panel.")
+
     def _toggle_showcase(self):
         if not self._showcase_active:
             if self._data_rec.is_recording:
@@ -1488,10 +1503,7 @@ class MainWindow(QMainWindow):
 
     def _start_showcase(self):
         if not config.SHOWCASE_VIDEO_PATH:
-            QMessageBox.warning(self, "Showcase Mode",
-                "SHOWCASE_VIDEO_PATH is not set in config.py. "
-                "Edit config.py and set the absolute path to your showcase video file.")
-            return
+            return   # button is disabled when path unset; guard only
         if config.SHOWCASE_STAGE not in (1, 2):
             QMessageBox.warning(self, "Showcase Mode",
                 "SHOWCASE_STAGE must be 1 or 2. Check config.py.")

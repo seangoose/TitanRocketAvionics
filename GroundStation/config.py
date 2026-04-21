@@ -31,7 +31,7 @@ FW_GPS_BAUD    = 57600
 # -----------------------------------------------------------------------------
 
 VIDEO_S1_INDEX = 0    # Stage 1 camera capture card device index
-VIDEO_S2_INDEX = 1    # Stage 2 camera capture card device index
+VIDEO_S2_INDEX = 2    # Stage 2 camera capture card device index  (/dev/video2)
 
 # Frame size requested from capture card
 # Most USB capture cards support 640x480 at 30 fps reliably on Pi 5.
