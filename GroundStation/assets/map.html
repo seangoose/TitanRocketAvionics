@@ -10,8 +10,8 @@
     Run:  python3 setup_offline.py
     before going to the competition site to populate assets/ and tile_cache/.
   -->
-  <link  rel="stylesheet" href="assets/leaflet.css"/>
-  <script src="assets/leaflet.js"></script>
+  <link  rel="stylesheet" href="leaflet.css"/>
+  <script src="leaflet.js"></script>
 
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -75,7 +75,7 @@ var map = L.map('map', {
 
 // ── OFFLINE tile layer (primary, always works after setup_offline.py) ─
 var offlineTiles = L.tileLayer(
-  'tile_cache/{z}/{x}/{y}.png',
+  '../tile_cache/{z}/{x}/{y}.png',
   {
     attribution: 'Map © OpenStreetMap contributors (offline cache)',
     maxZoom: 17,

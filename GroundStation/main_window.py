@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QGroupBox, QTextEdit,
     QSplitter, QFrame, QTabWidget, QSizePolicy, QFileDialog,
-    QMessageBox, QProgressBar, QComboBox
+    QMessageBox, QProgressBar, QComboBox, QScrollArea
 )
 
 import config
@@ -1018,34 +1018,45 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
+        # ── Outer vertical scroll area ────────────────────────────────
+        outer_scroll = QScrollArea()
+        outer_scroll.setWidgetResizable(True)
+        outer_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        outer_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        outer_scroll.setFrameShape(QFrame.NoFrame)
+        self.setCentralWidget(outer_scroll)
+
+        content = QWidget()
+        outer_scroll.setWidget(content)
+        root = QVBoxLayout(content)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(2)
 
         # ── Video panels ─────────────────────────────────────────────
         self._video_s2 = VideoPanel(2)
         self._video_s1 = VideoPanel(1)
+        self._video_s2.setMinimumHeight(320)
+        self._video_s1.setMinimumHeight(320)
 
         # ── Map ──────────────────────────────────────────────────────
         self._map = MapWidget()
+        self._map.setMinimumHeight(320)
 
-        # ── Live data (bottom right) ──────────────────────────────────
+        # ── Live data (bottom right) — telem stacked vertically ───────
         live_data = QWidget()
+        live_data.setMinimumHeight(320)
         ld_layout = QVBoxLayout(live_data)
-        ld_layout.setSpacing(4)
+        ld_layout.setSpacing(3)
+        ld_layout.setContentsMargins(2, 2, 2, 2)
 
         telem_hdr = QLabel("LIVE TELEMETRY")
         telem_hdr.setObjectName("section_header")
         ld_layout.addWidget(telem_hdr)
 
-        telem_row = QHBoxLayout()
         self._telem_s1 = TelemetryPanel(1)
         self._telem_s2 = TelemetryPanel(2)
-        telem_row.addWidget(self._telem_s1, 1)
-        telem_row.addWidget(self._telem_s2, 1)
-        ld_layout.addLayout(telem_row)
+        ld_layout.addWidget(self._telem_s1, 1)
+        ld_layout.addWidget(self._telem_s2, 1)
 
         self._gps_panel = GPSPanel()
         ld_layout.addWidget(self._gps_panel)
@@ -1062,11 +1073,10 @@ class MainWindow(QMainWindow):
         self._h_splitter = QSplitter(Qt.Horizontal)
         self._h_splitter.addWidget(self._left_splitter)
         self._h_splitter.addWidget(self._right_splitter)
+        self._h_splitter.setMinimumHeight(640)
+        self._h_splitter.setMinimumWidth(900)
 
-        self._outer_v_splitter = QSplitter(Qt.Vertical)
-        self._outer_v_splitter.addWidget(self._h_splitter)
-
-        root.addWidget(self._outer_v_splitter, 1)
+        root.addWidget(self._h_splitter, 1)
 
         # ── Command + Recording panels (instantiated; widgets extracted) ──
         self._cmd_panel = CommandPanel(self._radio_s1, self._radio_s2, self._data_rec)
@@ -1082,8 +1092,15 @@ class MainWindow(QMainWindow):
         self._debug = DebugConsole()
         self._test_stats_panel = TestStatsPanel()
 
-        # ── Controls bar ──────────────────────────────────────────────
-        root.addWidget(self._build_controls_bar())
+        # ── Controls bar in horizontal scroll area ────────────────────
+        ctrl_scroll = QScrollArea()
+        ctrl_scroll.setWidgetResizable(True)
+        ctrl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        ctrl_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ctrl_scroll.setFrameShape(QFrame.NoFrame)
+        ctrl_scroll.setFixedHeight(220)
+        ctrl_scroll.setWidget(self._build_controls_bar())
+        root.addWidget(ctrl_scroll)
 
         QTimer.singleShot(100, self._set_splitter_sizes)
 
@@ -1091,7 +1108,6 @@ class MainWindow(QMainWindow):
 
     def _build_controls_bar(self) -> QWidget:
         bar = QWidget()
-        bar.setFixedHeight(200)
         bar_layout = QHBoxLayout(bar)
         bar_layout.setSpacing(4)
         bar_layout.setContentsMargins(6, 6, 6, 6)
