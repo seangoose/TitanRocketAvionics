@@ -53,8 +53,8 @@ LORA_S2_FREQ_MHZ   = 915.0   # Stage 2 LoRa starting frequency
 
 # VTX frequencies — display only, not used to command radio hardware directly.
 # These are updated by STATUS packets received from the rocket.
-VTX_S1_FREQ_MHZ    = 5800
-VTX_S2_FREQ_MHZ    = 5800
+VTX_S1_FREQ_MHZ    = 5760   # Band F Ch 2 — Stage 1 Booster default
+VTX_S2_FREQ_MHZ    = 5800   # Band F Ch 4 — Stage 2 Sustainer default
 
 # -----------------------------------------------------------------------------
 #  MAP — LAUNCH SITE COORDINATES
