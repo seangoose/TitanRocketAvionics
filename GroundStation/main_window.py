@@ -13,11 +13,27 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QGroupBox, QTextEdit,
     QSplitter, QFrame, QTabWidget, QSizePolicy, QFileDialog,
-    QMessageBox, QProgressBar
+    QMessageBox, QProgressBar, QComboBox
 )
 
 import config
 import protocol as P
+
+# VTX band/channel lookup table — matches Teensy VTX_CHAN[5][8] exactly
+# Format: (display_label, freq_mhz)
+VTX_CHANNELS = []
+_VTX_BAND_NAMES = ["A", "B", "E", "F", "R"]
+_VTX_FREQS = [
+    [5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725],  # Band A
+    [5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866],  # Band B
+    [5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945],  # Band E
+    [5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880],  # Band F
+    [5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917],  # Raceband
+]
+for _b, _band in enumerate(_VTX_BAND_NAMES):
+    for _ch in range(8):
+        _freq = _VTX_FREQS[_b][_ch]
+        VTX_CHANNELS.append((f"{_band}{_ch+1} — {_freq} MHz", _freq))
 from data_recorder import DataRecorder, PacketStatsTracker
 from map_widget    import MapWidget
 from radio_worker  import RadioWorker
@@ -490,14 +506,26 @@ class CommandPanel(QWidget):
         vgl.addWidget(self._video_on_btn,  0, 1)
         vgl.addWidget(self._video_off_btn, 0, 2)
 
-        vgl.addWidget(QLabel("S1 VTX MHz:"), 1, 0)
-        self._vtx_s1_edit = QLineEdit(str(config.VTX_S1_FREQ_MHZ)); self._vtx_s1_edit.setMaximumWidth(65)
+        vgl.addWidget(QLabel("S1 VTX:"), 1, 0)
+        self._vtx_s1_edit = QComboBox()
+        for label, freq in VTX_CHANNELS:
+            self._vtx_s1_edit.addItem(label, freq)
+        _default_s1 = min(range(len(VTX_CHANNELS)),
+                          key=lambda i: abs(VTX_CHANNELS[i][1] - config.VTX_S1_FREQ_MHZ))
+        self._vtx_s1_edit.setCurrentIndex(_default_s1)
+        self._vtx_s1_edit.setMinimumWidth(130)
         vgl.addWidget(self._vtx_s1_edit, 1, 1)
         self._vtx_set_s1_btn = self._mkbtn("Set S1", lambda: self._send_vtx(1), "confirm")
         vgl.addWidget(self._vtx_set_s1_btn, 1, 2)
 
-        vgl.addWidget(QLabel("S2 VTX MHz:"), 2, 0)
-        self._vtx_s2_edit = QLineEdit(str(config.VTX_S2_FREQ_MHZ)); self._vtx_s2_edit.setMaximumWidth(65)
+        vgl.addWidget(QLabel("S2 VTX:"), 2, 0)
+        self._vtx_s2_edit = QComboBox()
+        for label, freq in VTX_CHANNELS:
+            self._vtx_s2_edit.addItem(label, freq)
+        _default_s2 = min(range(len(VTX_CHANNELS)),
+                          key=lambda i: abs(VTX_CHANNELS[i][1] - config.VTX_S2_FREQ_MHZ))
+        self._vtx_s2_edit.setCurrentIndex(_default_s2)
+        self._vtx_s2_edit.setMinimumWidth(130)
         vgl.addWidget(self._vtx_s2_edit, 2, 1)
         self._vtx_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_vtx(2), "confirm")
         vgl.addWidget(self._vtx_set_s2_btn, 2, 2)
@@ -678,13 +706,16 @@ class CommandPanel(QWidget):
         if self._data.is_recording: self._data.record_event(f"SET_LORA_FREQ {freq:.3f} → S{stage}")
 
     def _send_vtx(self, stage: int):
-        edit = self._vtx_s1_edit if stage == 1 else self._vtx_s2_edit
-        try: freq = int(edit.text())
-        except ValueError: self._log_msg("ERROR", P.CMD_SET_VTX_FREQ, stage, "Invalid MHz"); return
-        if not 5600 <= freq <= 5950: self._log_msg("ERROR", P.CMD_SET_VTX_FREQ, stage, f"{freq} outside 5600-5950"); return
+        combo = self._vtx_s1_edit if stage == 1 else self._vtx_s2_edit
+        freq = combo.currentData()
+        if freq is None:
+            self._log_msg("ERROR", P.CMD_SET_VTX_FREQ, stage, "No channel selected")
+            return
         self._radio(stage).send_frame(P.build_set_vtx_freq_frame(stage, freq))
-        self._log_msg("SENT", P.CMD_SET_VTX_FREQ, stage, f"{freq} MHz")
-        if self._data.is_recording: self._data.record_event(f"SET_VTX_FREQ {freq} → S{stage}")
+        label = combo.currentText()
+        self._log_msg("SENT", P.CMD_SET_VTX_FREQ, stage, f"{label}")
+        if self._data.is_recording:
+            self._data.record_event(f"SET_VTX_FREQ {label} → S{stage}")
 
     def _send_vtx_power(self, stage: int, level: int):
         try: frame = P.build_set_vtx_power_frame(stage, level)
@@ -1100,10 +1131,10 @@ class MainWindow(QMainWindow):
         g2l.addWidget(self._cmd_panel._cam_rec_off_btn, 1, 2)
         bar_layout.addWidget(g2)
 
-        # ── Group 3 — Video / VTX (230px) ────────────────────────────
+        # ── Group 3 — Video / VTX (260px) ────────────────────────────
         g3 = QGroupBox("Video / VTX")
         g3.setObjectName("controls_group")
-        g3.setFixedWidth(230)
+        g3.setFixedWidth(260)
         g3l = QGridLayout(g3)
         g3l.setSpacing(2)
         g3l.addWidget(self._cmd_panel._video_on_btn,  0, 0)

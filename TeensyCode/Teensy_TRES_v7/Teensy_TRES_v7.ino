@@ -98,7 +98,7 @@
 // ================================================================
 #define RATE_SENSOR_MS      10   // 100 Hz
 #define RATE_SD_MS          10   // 100 Hz
-#define RATE_OSD_MS        500   // 2 Hz
+#define RATE_OSD_MS        200   // 5 Hz
 #define RATE_DEBUG_MS      500   // 2 Hz
 #define TELEM_RATE_HIGH_MS 100   // 10 Hz  (LAUNCH_READY default)
 #define TELEM_RATE_LOW_MS 1000   // 1 Hz   (PAD_IDLE fixed)
@@ -159,12 +159,9 @@
 #define OSD_COLS        30
 
 // OSD element rows (safe zone: rows 1–11, visible in both NTSC and PAL)
-#define OSD_ROW_CALLSIGN   1
-#define OSD_ROW_MODE       2   // Ground mode + stage
-#define OSD_ROW_ALT        3
-#define OSD_ROW_VEL        4
-#define OSD_ROW_STATE      5
-#define OSD_ROW_FAULT      6
+#define OSD_ROW_TOP        1   // Callsign left + mission clock right
+#define OSD_ROW_MID        2   // Altitude left + flight state right
+#define OSD_ROW_BOT        3   // Velocity left + fault status right
 
 // AT7456E registers
 #define OSD_REG_VM0   0x00
@@ -385,6 +382,10 @@ GroundMode    groundMode   = GM_TEST_IDLE;
 // Task timers
 unsigned long tSensor=0, tSD=0, tTelem=0, tOSD=0,
               tDebug=0, tHeartbeat=0;
+
+// OSD mission elapsed time — starts from liftoff detection
+unsigned long tOSDLiftoff = 0;   // Set when FSM detects launch
+bool          osdMissionStarted = false;
 
 // Flight timestamps
 unsigned long tLiftoff=0, tBurnout=0, tSeparation=0;
@@ -959,30 +960,59 @@ bool initOSD() {
 #endif
 
   char hdr[28]; snprintf(hdr,sizeof(hdr),"%-10s S%d", CALLSIGN, STAGE);
-  osdPutStr(OSD_ROW_CALLSIGN, 1, hdr);
+  osdPutStr(OSD_ROW_TOP, 1, hdr);
   osdReady=true;
   Serial.print("[OSD] Ready — "); Serial.print(osdVideoRows); Serial.println(" rows");
   return true;
 }
 
+static void osdPutStrRight(uint8_t row, const char* str) {
+  uint8_t len = strlen(str);
+  if (len >= OSD_COLS) return;
+  uint8_t col = OSD_COLS - len - 2;
+  osdPutStr(row, col, str);
+}
+
 void updateOSD() {
   if ((faultFlags&FAULT_OSD)||!osdReady) return;
+  static bool osdFirstUpdate = true;
   char buf[22];
 
-  // Ground mode row
-  snprintf(buf, sizeof(buf), "%-18s", groundModeStr(groundMode));
-  osdPutStr(OSD_ROW_MODE, 1, buf);
+  if (osdFirstUpdate) {
+    for (uint8_t r = 4; r < osdVideoRows - 1; r++) osdClearRow(r);
+    osdFirstUpdate = false;
+  }
 
-  snprintf(buf, sizeof(buf), "ALT %6.0f FT    ", pkt.altitude_ft);
-  osdPutStr(OSD_ROW_ALT, 1, buf);
-  snprintf(buf, sizeof(buf), "VEL %5.1f FPS   ", pkt.velocity_fps);
-  osdPutStr(OSD_ROW_VEL, 1, buf);
-  snprintf(buf, sizeof(buf), "%-18s", flightStateStr((uint8_t)flightState));
-  osdPutStr(OSD_ROW_STATE, 1, buf);
-  if (pkt.fault_flags) {
-    snprintf(buf, sizeof(buf), "FLT 0x%02X         ", pkt.fault_flags);
-    osdPutStr(OSD_ROW_FAULT, 1, buf);
-  } else { osdClearRow(OSD_ROW_FAULT); }
+  // Row OSD_ROW_TOP — mission clock right (callsign left written once in initOSD)
+  if (osdMissionStarted) {
+    unsigned long elapsedSec = (millis() - tOSDLiftoff) / 1000UL;
+    snprintf(buf, sizeof(buf), "T+%03lus", elapsedSec);
+  } else {
+    snprintf(buf, sizeof(buf), "T+ --s");
+  }
+  osdPutStrRight(OSD_ROW_TOP, buf);
+
+  // Row OSD_ROW_MID — altitude left, flight state right
+  snprintf(buf, sizeof(buf), "ALT %5.0f FT", pkt.altitude_ft);
+  osdPutStr(OSD_ROW_MID, 1, buf);
+
+  char stateBuf[13];
+  snprintf(stateBuf, sizeof(stateBuf), "%s", flightStateStr((uint8_t)flightState));
+  osdPutStrRight(OSD_ROW_MID, stateBuf);
+
+  // Row OSD_ROW_BOT — velocity with direction indicator left, fault status right
+  char dir = '~';
+  if (pkt.velocity_fps >= 2.0f)  dir = '^';
+  if (pkt.velocity_fps <= -2.0f) dir = 'v';
+  snprintf(buf, sizeof(buf), "VEL %5.1f %c FPS", pkt.velocity_fps, dir);
+  osdPutStr(OSD_ROW_BOT, 1, buf);
+
+  if (pkt.fault_flags == 0) {
+    snprintf(buf, sizeof(buf), "OK");
+  } else {
+    snprintf(buf, sizeof(buf), "FLT %02X", pkt.fault_flags);
+  }
+  osdPutStrRight(OSD_ROW_BOT, buf);
 }
 
 // ================================================================
@@ -1083,6 +1113,7 @@ void updateFlightState() {
     case ST_PAD:
       if (aMag > THRESH_LAUNCH_ACCEL) {
         flightState=ST_BOOST; tLiftoff=now;
+        tOSDLiftoff = now; osdMissionStarted = true;
         // Auto-advance to LAUNCH_READY on liftoff from PAD_IDLE
         if (groundMode==GM_PAD_IDLE) setGroundMode(GM_LAUNCH_READY);
         Serial.println("[FSM] BOOST — launch");
@@ -1127,6 +1158,7 @@ void updateFlightState() {
     case ST_PAD:
       if (aMag > THRESH_LAUNCH_ACCEL) {
         flightState=ST_BOOST_S1; tLiftoff=now;
+        tOSDLiftoff = now; osdMissionStarted = true;
         if (groundMode==GM_PAD_IDLE) setGroundMode(GM_LAUNCH_READY);
         Serial.println("[FSM] BOOST_S1 — launch");
       }
