@@ -210,6 +210,7 @@
 #define CMD_SET_VTX_POWER  0x0F   // Extended PLEN=1 SA index 0-3
 #define CMD_CAM_RECORD_ON  0x10   // Start RunCam recording
 #define CMD_CAM_RECORD_OFF 0x11   // Stop RunCam recording
+#define CMD_FULL_SYS_TEST  0x12   // Full system test: VTX+cam+10Hz telem+solenoid(S2)
 
 #define ACK_OK        0x00
 #define ACK_REJECTED  0x01
@@ -707,6 +708,23 @@ void processUplink() {
 
     case CMD_CAM_RECORD_OFF:
       runcamStopRecording();
+      sendACK(cmd, ACK_OK);
+      break;
+
+    case CMD_FULL_SYS_TEST:
+      // Full system test — battery evaluation sequence.
+      // Activates VTX at flight power, starts RunCam recording,
+      // enables 10 Hz telemetry, and enters LAUNCH_READY.
+      // Stage 2: also fires solenoid (water payload, one-shot).
+      // Ground station runs a 90-second PacketStatsTracker during this.
+      videoEnabled = true;
+      telemRateMs  = TELEM_RATE_HIGH_MS;   // 10 Hz telem
+      runcamStartRecording();
+      setGroundMode(GM_LAUNCH_READY);      // Applies flight VTX power
+#if STAGE == 2
+      if (!solenoidFired) fireSolenoid();
+#endif
+      Serial.println(F("[CMD] FULL_SYS_TEST — video ON, 10Hz telem, LAUNCH_READY, cam recording"));
       sendACK(cmd, ACK_OK);
       break;
 

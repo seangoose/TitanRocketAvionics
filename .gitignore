@@ -16,3 +16,6 @@ tile_cache/
 
 # Claude Code configuration
 .claude/
+
+# Ground station session settings (auto-generated, machine-specific)
+GroundStation/settings.json

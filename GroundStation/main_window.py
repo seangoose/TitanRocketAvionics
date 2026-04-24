@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 
 import config
 import protocol as P
+from settings_manager import SettingsManager
 
 # VTX band/channel lookup table — matches Teensy VTX_CHAN[5][8] exactly
 # Format: (display_label, freq_mhz)
@@ -473,13 +474,15 @@ class CommandPanel(QWidget):
     full_sys_test_requested = pyqtSignal(list)
 
     def __init__(self, radio_s1: RadioWorker, radio_s2: RadioWorker,
-                 data_recorder: DataRecorder, parent=None):
+                 data_recorder: DataRecorder, settings_dict: dict = None,
+                 parent=None):
         super().__init__(parent)
         self._r1   = radio_s1
         self._r2   = radio_s2
         self._data = data_recorder
         self._s1_ground_mode = P.GM_TEST_IDLE
         self._s2_ground_mode = P.GM_TEST_IDLE
+        self._init_settings  = settings_dict or {}
         self._setup()
 
     def _setup(self):
@@ -543,8 +546,9 @@ class CommandPanel(QWidget):
         self._vtx_s1_edit = QComboBox()
         for label, freq in VTX_CHANNELS:
             self._vtx_s1_edit.addItem(label, freq)
+        _vtx_s1_freq = self._init_settings.get("vtx_s1_freq", config.VTX_S1_FREQ_MHZ)
         _default_s1 = min(range(len(VTX_CHANNELS)),
-                          key=lambda i: abs(VTX_CHANNELS[i][1] - config.VTX_S1_FREQ_MHZ))
+                          key=lambda i: abs(VTX_CHANNELS[i][1] - _vtx_s1_freq))
         self._vtx_s1_edit.setCurrentIndex(_default_s1)
         self._vtx_s1_edit.setMinimumWidth(130)
         vgl.addWidget(self._vtx_s1_edit, 1, 1)
@@ -555,8 +559,9 @@ class CommandPanel(QWidget):
         self._vtx_s2_edit = QComboBox()
         for label, freq in VTX_CHANNELS:
             self._vtx_s2_edit.addItem(label, freq)
+        _vtx_s2_freq = self._init_settings.get("vtx_s2_freq", config.VTX_S2_FREQ_MHZ)
         _default_s2 = min(range(len(VTX_CHANNELS)),
-                          key=lambda i: abs(VTX_CHANNELS[i][1] - config.VTX_S2_FREQ_MHZ))
+                          key=lambda i: abs(VTX_CHANNELS[i][1] - _vtx_s2_freq))
         self._vtx_s2_edit.setCurrentIndex(_default_s2)
         self._vtx_s2_edit.setMinimumWidth(130)
         vgl.addWidget(self._vtx_s2_edit, 2, 1)
@@ -595,13 +600,15 @@ class CommandPanel(QWidget):
         tgl.addWidget(self._get_status_btn, 1, 1)
 
         tgl.addWidget(QLabel("S1 LoRa MHz:"), 2, 0)
-        self._lora_s1_edit = QLineEdit(f"{config.LORA_S1_FREQ_MHZ:.3f}"); self._lora_s1_edit.setMaximumWidth(75)
+        _lora_s1_default = self._init_settings.get("lora_s1_freq", config.LORA_S1_FREQ_MHZ)
+        self._lora_s1_edit = QLineEdit(f"{_lora_s1_default:.3f}"); self._lora_s1_edit.setMaximumWidth(75)
         tgl.addWidget(self._lora_s1_edit, 2, 1)
         self._lora_set_s1_btn = self._mkbtn("Set S1", lambda: self._send_lora(1), "confirm")
         tgl.addWidget(self._lora_set_s1_btn, 2, 2)
 
         tgl.addWidget(QLabel("S2 LoRa MHz:"), 3, 0)
-        self._lora_s2_edit = QLineEdit(f"{config.LORA_S2_FREQ_MHZ:.3f}"); self._lora_s2_edit.setMaximumWidth(75)
+        _lora_s2_default = self._init_settings.get("lora_s2_freq", config.LORA_S2_FREQ_MHZ)
+        self._lora_s2_edit = QLineEdit(f"{_lora_s2_default:.3f}"); self._lora_s2_edit.setMaximumWidth(75)
         tgl.addWidget(self._lora_s2_edit, 3, 1)
         self._lora_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_lora(2), "confirm")
         tgl.addWidget(self._lora_set_s2_btn, 3, 2)
@@ -810,8 +817,14 @@ class CommandPanel(QWidget):
     # ------------------------------------------------------------------
     @pyqtSlot(int, dict)
     def on_ack(self, stage: int, ack: dict):
-        result = "✅ OK" if ack["result"] == P.ACK_OK else "❌ REJECTED"
-        self._log_msg(result, ack["cmd"], stage, f"← ACK from S{stage}")
+        name = P.CMD_NAMES.get(ack["cmd"], f"0x{ack['cmd']:02X}")
+        s    = f"S{stage}"
+        if ack["result"] == P.ACK_OK:
+            line = f'<span style="color:#3fb950;font-weight:bold;">[ACK OK  ] {s} {name} ← ACK from S{stage}</span>'
+        else:
+            line = f'<span style="color:#ff7b72;font-weight:bold;">[REJECTED] {s} {name} ← ACK REJECTED from S{stage}</span>'
+        self._log.append(line)
+        self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
 
     @pyqtSlot(int, str)
     def on_raw_log(self, _stage: int, msg: str):
@@ -839,6 +852,21 @@ class CommandPanel(QWidget):
     @property
     def test_mode(self) -> bool:
         return False
+
+    def current_settings(self) -> dict:
+        """Return current UI values for settings persistence."""
+        try: lora_s1 = float(self._lora_s1_edit.text())
+        except ValueError: lora_s1 = config.LORA_S1_FREQ_MHZ
+        try: lora_s2 = float(self._lora_s2_edit.text())
+        except ValueError: lora_s2 = config.LORA_S2_FREQ_MHZ
+        vtx_s1_freq = self._vtx_s1_edit.currentData() or config.VTX_S1_FREQ_MHZ
+        vtx_s2_freq = self._vtx_s2_edit.currentData() or config.VTX_S2_FREQ_MHZ
+        return {
+            "lora_s1_freq": lora_s1,
+            "lora_s2_freq": lora_s2,
+            "vtx_s1_freq":  vtx_s1_freq,
+            "vtx_s2_freq":  vtx_s2_freq,
+        }
 
 
 class DebugConsole(QGroupBox):
@@ -915,6 +943,19 @@ class TestStatsPanel(QWidget):
         self._progress.setTextVisible(True)
         layout.addWidget(self._progress)
 
+        self._no_link_warn = QLabel(
+            "WARNING: No packets received — verify LoRa link and that "
+            "CMD_FULL_SYS_TEST was acknowledged before starting test."
+        )
+        self._no_link_warn.setWordWrap(True)
+        self._no_link_warn.setStyleSheet(
+            "color:#ff7b72; font-weight:bold; "
+            "background-color:#2d0f0f; border:1px solid #da3633; "
+            "border-radius:4px; padding:6px;"
+        )
+        self._no_link_warn.setVisible(False)
+        layout.addWidget(self._no_link_warn)
+
     def update_stats(self, stage: int, summary: dict):
         widgets = {
             1: {"packets": self._s1_packets, "loss": self._s1_loss,
@@ -963,10 +1004,14 @@ class TestStatsPanel(QWidget):
                 w.setText("—"); w.setStyleSheet("")
         self._progress.setValue(0)
         self._progress.setFormat("No test running")
+        self._no_link_warn.setVisible(False)
 
     def set_progress(self, pct: int, label_str: str):
         self._progress.setValue(pct)
         self._progress.setFormat(label_str)
+
+    def show_no_link_warning(self, visible: bool):
+        self._no_link_warn.setVisible(visible)
 
 
 # =============================================================================
@@ -1013,6 +1058,9 @@ class MainWindow(QMainWindow):
         if config.DARK_MODE:
             self.setStyleSheet(DARK_STYLE)
 
+        self._settings = SettingsManager()
+        self._loaded_settings = self._settings.load()
+
         self._data_rec = DataRecorder()
 
         self._s1_ground_mode = P.GM_TEST_IDLE
@@ -1025,6 +1073,7 @@ class MainWindow(QMainWindow):
         self._test_timer.setInterval(1000)
         self._test_elapsed_s = 0
         self._test_timer_connected = False
+        self._no_link_check_done = False
 
         self._radio_s1 = RadioWorker(1, config.M0_S1_PORT, config.M0_S1_BAUD)
         self._radio_s2 = RadioWorker(2, config.M0_S2_PORT, config.M0_S2_BAUD)
@@ -1120,7 +1169,8 @@ class MainWindow(QMainWindow):
         root.addWidget(self._h_splitter, 1)
 
         # ── Command + Recording panels (instantiated; widgets extracted) ──
-        self._cmd_panel = CommandPanel(self._radio_s1, self._radio_s2, self._data_rec)
+        self._cmd_panel = CommandPanel(self._radio_s1, self._radio_s2, self._data_rec,
+                                       settings_dict=self._loaded_settings)
         self._cmd_panel.clear_tracks_btn.clicked.connect(self._map.clear_tracks)
         for key, btn in self._cmd_panel.site_btns.items():
             site = config.MAP_SITES[key]
@@ -1128,6 +1178,10 @@ class MainWindow(QMainWindow):
                 lambda _=False, s=site: self._map.set_site(s["lat"], s["lon"], s["zoom"])
             )
         self._rec_panel = RecordingPanel(self._vid_s1, self._vid_s2, self._data_rec)
+        # Pre-populate session name from persisted settings
+        last_name = self._loaded_settings.get("last_session_name", "")
+        if last_name:
+            self._rec_panel._name_edit.setText(last_name)
 
         # ── Debug + test stats (live even when log window is hidden) ──
         self._debug = DebugConsole()
@@ -1395,11 +1449,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str, float, float, float, float, float)
     def _on_gps(self, name, lat, lon, alt_ft, vert_vel, horiz_vel):
-        launch_ready = (self._s1_ground_mode == P.GM_LAUNCH_READY or
-                        self._s2_ground_mode == P.GM_LAUNCH_READY)
-        if not launch_ready:
-            return
-
+        # GPS data always flows to map and GPS panel regardless of ground mode.
+        # (Removed launch_ready gate — GPS must be visible at all times for recovery.)
         nl = name.lower()
         stage = 1 if any(k in nl for k in ["s1", "stage1", "booster"]) else 2
         self._map.update_gps(stage, lat, lon, alt_ft, vert_vel, name)
@@ -1446,6 +1497,7 @@ class MainWindow(QMainWindow):
             self._log_window.centralWidget().layout().itemAt(0).widget().setCurrentIndex(1)
 
         self._test_elapsed_s = 0
+        self._no_link_check_done = False
 
         if not self._test_timer_connected:
             self._test_timer.timeout.connect(self._on_test_tick)
@@ -1470,11 +1522,22 @@ class MainWindow(QMainWindow):
             summary = tracker.summary_dict()
             self._test_stats_panel.update_stats(stage, summary)
 
+        # After 5 seconds, check if any packets were received.
+        # If none, show a prominent warning — the test likely did not start.
+        if self._test_elapsed_s == 5 and not self._no_link_check_done:
+            self._no_link_check_done = True
+            total_received = sum(
+                (self._stats_s1 if s == 1 else self._stats_s2).summary_dict()["received"]
+                for s in self._test_active_stages
+            )
+            self._test_stats_panel.show_no_link_warning(total_received == 0)
+
         if self._test_elapsed_s >= duration:
             self._on_test_complete()
 
     def _on_test_complete(self):
         self._test_timer.stop()
+        self._test_stats_panel.show_no_link_warning(False)
 
         for stage in self._test_active_stages:
             tracker = self._stats_s1 if stage == 1 else self._stats_s2
@@ -1663,6 +1726,16 @@ class MainWindow(QMainWindow):
             w.start()
 
     def closeEvent(self, event):
+        # Persist current settings before shutdown
+        settings_to_save = self._cmd_panel.current_settings()
+        settings_to_save["last_session_name"] = self._rec_panel._name_edit.text().strip()
+        # vtx_s1_power and vtx_s2_power are not directly exposed from the button UI;
+        # carry forward whatever was last loaded (they update when STATUS packets arrive
+        # but there is no per-stage power tracking in the UI widgets themselves).
+        settings_to_save["vtx_s1_power"] = self._loaded_settings.get("vtx_s1_power", 0)
+        settings_to_save["vtx_s2_power"] = self._loaded_settings.get("vtx_s2_power", 0)
+        self._settings.save(settings_to_save)
+
         if self._log_window:
             self._log_window.close()
         if self._showcase_active:
