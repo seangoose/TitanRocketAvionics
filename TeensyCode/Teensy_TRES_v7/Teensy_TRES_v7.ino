@@ -965,7 +965,11 @@ bool initOSD() {
   osdWrite(OSD_REG_VM0, OSD_VM0_RESET); delay(2);
   uint16_t to=5000;
   while ((osdRead(OSD_REG_STAT)&OSD_STAT_RESET) && --to) delayMicroseconds(1);
-  if (!to) { faultFlags|=FAULT_OSD; Serial.println("[OSD] FAIL — reset timeout"); return false; }
+  if (!to) {
+    faultFlags|=FAULT_OSD; Serial.println("[OSD] FAIL — reset timeout (SPI/level-shifter fault?)");
+    osdWrite(OSD_REG_VM0, OSD_VM0_ENABLE);  // attempt to enable passthrough even on SPI fault
+    return false;
+  }
   osdWrite(OSD_REG_VM0, OSD_VM0_ENABLE); delay(50);
 
 #if OSD_FORCE_FORMAT == OSD_FMT_NTSC
