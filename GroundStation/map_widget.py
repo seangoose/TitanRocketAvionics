@@ -13,11 +13,11 @@ import config
 
 
 class SilentPage(QWebEnginePage):
-    """Suppress JavaScript console messages from Leaflet tiles."""
+    """Log JavaScript errors; suppress noisy tile-404 warnings."""
     def javaScriptConsoleMessage(self, level, msg, line, source):
-        # Uncomment the line below for debugging JavaScript errors
-        # print(f"[MAP JS] {source}:{line} — {msg}")
-        pass
+        # Level 0=Info, 1=Warning, 2=Error — print errors and warnings only
+        if level >= 1:
+            print(f"[MAP JS] {source}:{line} — {msg}")
 
 
 class MapWidget(QWidget):

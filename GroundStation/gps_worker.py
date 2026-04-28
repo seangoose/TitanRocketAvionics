@@ -189,12 +189,17 @@ class FWGPSWorker(QThread):
         IDX_HORIZ_VEL = 10
         # ──────────────────────────────────────────────────────────
 
-        name      = parts[IDX_NAME].strip()
-        lat       = float(parts[IDX_LAT])
-        lon       = float(parts[IDX_LON])
-        alt_ft    = float(parts[IDX_ALT_FT])
-        vert_vel  = float(parts[IDX_VERT_VEL])
-        horiz_vel = float(parts[IDX_HORIZ_VEL])
+        name = parts[IDX_NAME].strip()
+
+        try:
+            lat       = float(parts[IDX_LAT])
+            lon       = float(parts[IDX_LON])
+            alt_ft    = float(parts[IDX_ALT_FT])
+            vert_vel  = float(parts[IDX_VERT_VEL])
+            horiz_vel = float(parts[IDX_HORIZ_VEL])
+        except (ValueError, IndexError):
+            self.raw_log.emit(f"[FW GPS] {name}: NO FIX — waiting for satellites")
+            return
 
         self.position_update.emit(name, lat, lon, alt_ft, vert_vel, horiz_vel)
 
