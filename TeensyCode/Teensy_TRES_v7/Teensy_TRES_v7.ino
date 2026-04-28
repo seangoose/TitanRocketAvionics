@@ -36,7 +36,7 @@
 // ================================================================
 //  *** EDIT BEFORE EVERY FLASH ***
 // ================================================================
-#define STAGE      2
+#define STAGE      1
 #define CALLSIGN   "KO6NHZ"
 
 // Self-test mode — set 1 for bench testing, 0 for flight
@@ -407,6 +407,7 @@ uint8_t faultFlags = FAULT_NONE;
 bool     videoEnabled    = true;
 unsigned long telemRateMs= TELEM_RATE_HIGH_MS;  // User-configured rate for LAUNCH_READY
 float    currentLoRaFreq = RF95_FREQ_DEFAULT;
+uint32_t telemTxCount    = 0;   // Incremented every time a DATA packet is sent over LoRa
 uint16_t currentVTXFreq  = 5800;
 uint8_t  currentVTXPwrIdx= VTX_PWR_OFF;
 uint8_t  vtxFlightPower  = VTX_PWR_FLIGHT;  // Applied when entering LAUNCH_READY
@@ -470,7 +471,7 @@ bool initSD() {
   do { snprintf(fname,sizeof(fname),"FLT%03dS%d.CSV",n++,STAGE); } while(SD.exists(fname)&&n<200);
   logFile = SD.open(fname, FILE_WRITE);
   if (!logFile) { faultFlags|=FAULT_SD; return false; }
-  logFile.println("ts_ms,alt_ft,vel_fps,accel_thrust,accel_lat,gyro_roll,gyro_pitch,gyro_yaw,temp_c,state,stage,faults,ground_mode");
+  logFile.println("ts_ms,alt_ft,vel_fps,accel_thrust,accel_lat,gyro_roll,gyro_pitch,gyro_yaw,temp_c,state,stage,faults,ground_mode,lora_freq_mhz,telem_tx_count");
   logFile.flush(); logOpen=true;
   Serial.print("[SD] → "); Serial.println(fname); return true;
 }
@@ -488,7 +489,9 @@ void logToSD() {
   logFile.print(pkt.state);           logFile.print(',');
   logFile.print(pkt.stage);           logFile.print(',');
   logFile.print(pkt.fault_flags);     logFile.print(',');
-  logFile.println((uint8_t)groundMode);
+  logFile.print((uint8_t)groundMode); logFile.print(',');
+  logFile.print(currentLoRaFreq,3);   logFile.print(',');
+  logFile.println(telemTxCount);
   static uint8_t fc=0; if(++fc>=20){logFile.flush();fc=0;}
 }
 void closeSD() { if(!logOpen)return; logFile.flush(); logFile.close(); logOpen=false; Serial.println("[SD] Closed"); }
@@ -523,6 +526,7 @@ void sendTelemetry() {
   frame[0]=TRES_MAGIC_0; frame[1]=TRES_MAGIC_1; frame[2]=(uint8_t)STAGE; frame[3]=PKT_TYPE_DATA;
   memcpy(frame+4, &pkt, sizeof(pkt));
   rf95.send(frame, sizeof(frame));
+  telemTxCount++;
 }
 
 // ================================================================

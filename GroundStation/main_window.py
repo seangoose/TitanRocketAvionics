@@ -624,6 +624,11 @@ class CommandPanel(QWidget):
         self._lora_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_lora(2))
         tgl.addWidget(self._lora_set_s2_btn, 4, 2)
 
+        # Sync M0 buttons — retune the local M0 radio directly, no CMD to rocket.
+        # Use when M0 and Teensy are on different frequencies (e.g. after Teensy power cycle).
+        self._lora_sync_s1_btn = self._mkbtn("Sync M0", lambda: self._sync_m0(1))
+        self._lora_sync_s2_btn = self._mkbtn("Sync M0", lambda: self._sync_m0(2))
+
         self._lora_s1_edit.textChanged.connect(lambda _: self._on_lora_text_changed(1))
         self._lora_s2_edit.textChanged.connect(lambda _: self._on_lora_text_changed(2))
         layout.addWidget(tg)
@@ -822,6 +827,19 @@ class CommandPanel(QWidget):
         self._radio(stage).set_intended_freq(freq)
         self._log_msg("SENT", P.CMD_SET_LORA_FREQ, stage, f"{freq:.3f} MHz — M0 auto-retunes on STATUS")
         if self._data.is_recording: self._data.record_event(f"SET_LORA_FREQ {freq:.3f} → S{stage}")
+
+    def _sync_m0(self, stage: int):
+        """Retune M0 hardware to the typed frequency immediately — no CMD sent to rocket.
+        Use when M0 and Teensy are on different frequencies (e.g. Teensy power-cycled to 915 default)."""
+        edit = self._lora_s1_edit if stage == 1 else self._lora_s2_edit
+        try: freq = float(edit.text())
+        except ValueError: self._log_msg("ERROR", P.CMD_SET_LORA_FREQ, stage, "Invalid MHz"); return
+        if not 902.0 <= freq <= 928.0:
+            self._log_msg("ERROR", P.CMD_SET_LORA_FREQ, stage, f"{freq} outside 902-928"); return
+        self._radio(stage).retune(freq)
+        self._radio(stage).set_intended_freq(freq)
+        self._log_msg("SENT", P.CMD_SET_LORA_FREQ, stage,
+                      f"M0 local retune → {freq:.3f} MHz  (no CMD sent to rocket)")
 
     def _send_vtx(self, stage: int):
         combo = self._vtx_s1_edit if stage == 1 else self._vtx_s2_edit
@@ -1357,10 +1375,12 @@ class MainWindow(QMainWindow):
         g4l.addWidget(self._cmd_panel._get_status_btn,      1, 3)
         g4l.addWidget(QLabel("S1 LoRa:"),                   2, 0)
         g4l.addWidget(self._cmd_panel._lora_s1_edit,        2, 1)
-        g4l.addWidget(self._cmd_panel._lora_set_s1_btn,     2, 2)
+        g4l.addWidget(self._cmd_panel._lora_set_s1_btn,      2, 2)
+        g4l.addWidget(self._cmd_panel._lora_sync_s1_btn,    2, 3)
         g4l.addWidget(QLabel("S2 LoRa:"),                   3, 0)
         g4l.addWidget(self._cmd_panel._lora_s2_edit,        3, 1)
         g4l.addWidget(self._cmd_panel._lora_set_s2_btn,     3, 2)
+        g4l.addWidget(self._cmd_panel._lora_sync_s2_btn,    3, 3)
         bar_layout.addWidget(g4)
 
         # ── Group 5 — Test / Payload (210px) ─────────────────────────
