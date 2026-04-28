@@ -37,7 +37,7 @@
 //  *** EDIT BEFORE EVERY FLASH ***
 // ================================================================
 #define STAGE      2
-#define CALLSIGN   "KD0XXX"
+#define CALLSIGN   "KO6NHZ"
 
 // Self-test mode — set 1 for bench testing, 0 for flight
 // When 1: runSelfTest() executes at the start of setup() then normal boot continues.
