@@ -61,9 +61,12 @@ class DataRecorder:
         "lora_freq_mhz",
         "vtx_freq_mhz",
         "vtx_power_index",
+        "vtx_flight_power",   # Stored flight-power level (applied on LAUNCH_READY)
         "telem_rate_hz",
         "video_enabled",
         "test_mode",
+        "ground_mode",        # 0=TEST_IDLE 1=PAD_IDLE 2=LAUNCH_READY
+        "cam_recording",      # 0=off 1=recording
         "last_cmd_hex",
         "last_cmd_result",
         # GPS fields
@@ -174,11 +177,26 @@ class DataRecorder:
             "lora_freq_mhz":   f"{d.get('lora_freq_mhz', 0):.3f}",
             "vtx_freq_mhz":    d.get("vtx_freq_mhz", ""),
             "vtx_power_index": d.get("vtx_power_index", ""),
+            "vtx_flight_power":d.get("vtx_flight_power", ""),
             "telem_rate_hz":   d.get("telem_rate_hz", ""),
             "video_enabled":   d.get("video_enabled", ""),
             "test_mode":       d.get("test_mode", ""),
+            "ground_mode":     d.get("ground_mode", ""),
+            "cam_recording":   d.get("cam_recording", ""),
             "last_cmd_hex":    f"0x{d.get('last_cmd', 0):02X}",
             "last_cmd_result": d.get("last_cmd_result", ""),
+        })
+        self._write_row(row)
+
+    def record_ack(self, stage: int, ack: dict):
+        """Record one ACK frame received from the Teensy.
+        source=ACK, reuses last_cmd_hex / last_cmd_result columns."""
+        if not self._active:
+            return
+        row = self._base_row("ACK", stage)
+        row.update({
+            "last_cmd_hex":    f"0x{ack.get('cmd', 0):02X}",
+            "last_cmd_result": ack.get("result", ""),
         })
         self._write_row(row)
 

@@ -1526,6 +1526,8 @@ class MainWindow(QMainWindow):
         result = "✅ OK" if ack["result"] == P.ACK_OK else "❌ REJECTED"
         name = P.CMD_NAMES.get(ack["cmd"], f"0x{ack['cmd']:02X}")
         self._last_cmd_label.setText(f"S{stage} {name}: {result}")
+        if self._data_rec.is_recording:
+            self._data_rec.record_ack(stage, ack)
 
     @pyqtSlot(int, dict)
     @pyqtSlot(int, dict)
