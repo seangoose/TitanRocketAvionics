@@ -860,18 +860,18 @@ static void runcamSendCmd(uint8_t cmdId, const uint8_t* data, uint8_t dataLen) {
 
 void runcamStartRecording() {
   if (camRecording) return;
-  uint8_t action = RCDP_ACT_START;
+  uint8_t action = RCDP_ACT_POWER;   // Toggle — compatible with factory Split 4 firmware
   runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
   camRecording = true;
-  Serial.println(F("[CAM] Recording started (RCDP START)"));
+  Serial.println(F("[CAM] Recording started (RCDP POWER toggle)"));
 }
 
 void runcamStopRecording() {
   if (!camRecording) return;
-  uint8_t action = RCDP_ACT_STOP;
+  uint8_t action = RCDP_ACT_POWER;   // Toggle — compatible with factory Split 4 firmware
   runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
   camRecording = false;
-  Serial.println(F("[CAM] Recording stopped (RCDP STOP)"));
+  Serial.println(F("[CAM] Recording stopped (RCDP POWER toggle)"));
 }
 
 bool initRunCam() {
