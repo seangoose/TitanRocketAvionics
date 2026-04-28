@@ -87,7 +87,11 @@
 // ================================================================
 //  LoRa
 // ================================================================
-#define RF95_FREQ_DEFAULT  915.0f
+#if STAGE == 1
+  #define RF95_FREQ_DEFAULT  905.0f   // Must match LORA_S1_FREQ_MHZ in ground station config.py
+#elif STAGE == 2
+  #define RF95_FREQ_DEFAULT  925.0f   // Must match LORA_S2_FREQ_MHZ in ground station config.py
+#endif
 #define RF95_TX_DBM        23
 #define RF95_SF             8
 #define RF95_BW        125000UL
@@ -510,7 +514,7 @@ bool initLoRa() {
   rf95.setSignalBandwidth(RF95_BW);
   rf95.setCodingRate4(RF95_CR);
   rf95.setModeRx();
-  Serial.println("[LoRa] OK — 915 MHz | SF8 | 125 kHz | 23 dBm | RX armed");
+  Serial.print("[LoRa] OK — "); Serial.print(RF95_FREQ_DEFAULT,1); Serial.println(" MHz | SF8 | 125 kHz | 23 dBm | RX armed");
   return true;
 }
 
