@@ -522,7 +522,7 @@ void sendTelemetry() {
   uint8_t frame[4+sizeof(pkt)];
   frame[0]=TRES_MAGIC_0; frame[1]=TRES_MAGIC_1; frame[2]=(uint8_t)STAGE; frame[3]=PKT_TYPE_DATA;
   memcpy(frame+4, &pkt, sizeof(pkt));
-  rf95.send(frame, sizeof(frame)); rf95.waitPacketSent();
+  rf95.send(frame, sizeof(frame));
 }
 
 // ================================================================
@@ -532,7 +532,7 @@ void sendACK(uint8_t cmd, uint8_t result) {
   lastCmd=cmd; lastCmdResult=result;
   if (!(faultFlags&FAULT_LORA)) {
     uint8_t f[7]={TRES_MAGIC_0,TRES_MAGIC_1,(uint8_t)STAGE,PKT_TYPE_ACK,cmd,result,0};
-    f[6]=calcCRC8(f,6); rf95.send(f,7); rf95.waitPacketSent();
+    f[6]=calcCRC8(f,6); rf95.send(f,7);
   }
   printSerialStatus(cmd, result);
   sendStatusPacket(cmd, result);
@@ -559,7 +559,7 @@ void sendStatusPacket(uint8_t cmd, uint8_t result) {
   uint8_t frame[4+sizeof(sp)];
   frame[0]=TRES_MAGIC_0; frame[1]=TRES_MAGIC_1; frame[2]=(uint8_t)STAGE; frame[3]=PKT_TYPE_STATUS;
   memcpy(frame+4, &sp, sizeof(sp));
-  rf95.send(frame, sizeof(frame)); rf95.waitPacketSent();
+  rf95.send(frame, sizeof(frame));
 }
 
 // ================================================================
@@ -659,11 +659,14 @@ void processUplink() {
       if (newFreq<902.0f || newFreq>928.0f) { sendACK(cmd, ACK_REJECTED); break; }
       Serial.print(F("[CMD] SET_LORA_FREQ ")); Serial.print(currentLoRaFreq,3);
       Serial.print(F(" → ")); Serial.print(newFreq,3); Serial.println(F(" MHz"));
-      Serial.println(F("      ACK on OLD freq — ground radio M0 will auto-retune"));
+      // Update tracking variable BEFORE ACK so STATUS packet carries the new frequency,
+      // allowing the ground station M0 to retune to the correct frequency.
+      currentLoRaFreq = newFreq;
       sendACK(cmd, ACK_OK);
       delay(80);
-      if (rf95.setFrequency(newFreq)) currentLoRaFreq=newFreq;
-      else { faultFlags|=FAULT_LORA; Serial.println(F("[LoRa] setFrequency() failed")); }
+      if (!rf95.setFrequency(newFreq)) {
+        faultFlags|=FAULT_LORA; Serial.println(F("[LoRa] setFrequency() failed"));
+      }
       break;
     }
 
@@ -1112,7 +1115,11 @@ void readSensors() {
     pkt.gyro_roll=gEv.gyro.x; pkt.gyro_pitch=gEv.gyro.y; pkt.gyro_yaw=gEv.gyro.z;
     if (faultFlags&FAULT_BMP) pkt.temperature_c=tEv.temperature;
   }
-  altVelocity=(pkt.altitude_ft-prevAltitude)/(RATE_SENSOR_MS/1000.0f);
+  static unsigned long tPrevAlt = 0;
+  unsigned long tNow = millis();
+  float dt = (tPrevAlt > 0) ? (tNow - tPrevAlt) * 0.001f : RATE_SENSOR_MS * 0.001f;
+  tPrevAlt = tNow;
+  altVelocity = (pkt.altitude_ft - prevAltitude) / dt;
   pkt.velocity_fps=altVelocity; pkt.fault_flags=faultFlags; pkt.state=(uint8_t)flightState; pkt.stage=STAGE;
 }
 
