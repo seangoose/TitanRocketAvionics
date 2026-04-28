@@ -24,12 +24,12 @@
 import sys
 import os
 
-# Must be set before any Qt imports when running on Pi without a display server
-# or with a framebuffer. Comment this out if running in a full desktop session.
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+# Force X11 backend — overrides any Wayland Qt variables set by the Pi 5 OS,
+# which would cause QWebEngineView to crash or render blank.
+os.environ["QT_QPA_PLATFORM"] = "xcb"
 
-# Disable GPU sandbox (sometimes needed on Pi 5 for QWebEngine)
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
+# Disable GPU sandbox required for QWebEngine on Pi 5.
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox"
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore    import Qt
