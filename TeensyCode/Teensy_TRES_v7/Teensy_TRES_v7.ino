@@ -704,8 +704,7 @@ void processUplink() {
       uint8_t level = rxBuf[6];
       if (level > 3) { sendACK(cmd, ACK_REJECTED); break; }
       vtxFlightPower = level;
-      // Apply immediately if already in LAUNCH_READY
-      if (groundMode == GM_LAUNCH_READY) vtxSetPower(vtxFlightPower);
+      vtxSetPower(level);   // Apply immediately in any mode — needed for bench VTX testing
       Serial.print(F("[CMD] SET_VTX_POWER → index ")); Serial.println(level);
       sendACK(cmd, ACK_OK);
       break;
