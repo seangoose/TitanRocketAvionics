@@ -179,10 +179,15 @@ class RadioWorker(QThread):
 
     def _find_header(self, buf: bytearray) -> int:
         for i in range(len(buf) - 2):
-            if (buf[i]   == MAGIC_0 and
-                buf[i+1] == MAGIC_1 and
-                buf[i+2] == self.stage):
-                return i
+            if buf[i] == MAGIC_0 and buf[i+1] == MAGIC_1:
+                found_stage = buf[i+2]
+                if found_stage == self.stage:
+                    return i
+                # Stage 1 or 2 but wrong for this worker — log it so swapped cables are visible
+                if found_stage in (1, 2):
+                    self.raw_log.emit(self.stage,
+                        f"[RX S{self.stage}] REJECTED — frame stage={found_stage}, "
+                        f"expected={self.stage}  ← check M0 cable assignments")
         return -1
 
     def _expected_size(self, pkt_type: int) -> int:

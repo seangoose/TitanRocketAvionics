@@ -11,11 +11,11 @@
 # -----------------------------------------------------------------------------
 
 # Adafruit M0 LoRa radio — Stage 1 uplink/downlink
-M0_S1_PORT     = "/dev/tres_m0_s1"
+M0_S1_PORT     = "/dev/tres_m0_s2"   # Physical S1 M0 is plugged into the S2 USB port
 M0_S1_BAUD     = 115200
 
 # Adafruit M0 LoRa radio — Stage 2 uplink/downlink
-M0_S2_PORT     = "/dev/tres_m0_s2"
+M0_S2_PORT     = "/dev/tres_m0_s1"   # Physical S2 M0 is plugged into the S1 USB port
 M0_S2_BAUD     = 115200
 
 # Featherweight GPS Ground Station V2 — USB serial
