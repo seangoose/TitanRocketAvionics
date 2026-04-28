@@ -514,25 +514,20 @@ class CommandPanel(QWidget):
         gml.addWidget(self._gm_s1_ind, 3, 0, 1, 2); gml.addWidget(self._gm_s2_ind, 3, 2, 1, 2)
         layout.addWidget(gm)
 
-        # ── 2. STAGE SELECTOR ───────────────────────────────────
-        sel = QGroupBox("Target Stage (commands below)"); sl = QHBoxLayout(sel)
-        self._btn_s1   = QPushButton("Stage 1"); self._btn_s1.setCheckable(True); self._btn_s1.setChecked(True)
-        self._btn_s2   = QPushButton("Stage 2"); self._btn_s2.setCheckable(True)
-        self._btn_both = QPushButton("Both");    self._btn_both.setCheckable(True)
-        for b in [self._btn_s1, self._btn_s2, self._btn_both]:
-            sl.addWidget(b); b.clicked.connect(self._stage_sel)
-        layout.addWidget(sel)
-
-        # ── 3. CAMERA CONTROLS ──────────────────────────────────
-        cg = QGroupBox("RunCam Recording  [stage selector]"); cgl = QGridLayout(cg)
-        self._cam_rec_on_btn  = self._mkbtn("⏺  Record ON",  lambda: self._send(P.CMD_CAM_RECORD_ON),  "confirm")
-        self._cam_rec_off_btn = self._mkbtn("⏹  Record OFF", lambda: self._send(P.CMD_CAM_RECORD_OFF), "danger")
-        cgl.addWidget(self._cam_rec_on_btn,  0, 0)
-        cgl.addWidget(self._cam_rec_off_btn, 0, 1)
-        note = QLabel("Writes to RunCam SD. Independent of VTX RF.")
-        note.setObjectName("telem_label"); note.setWordWrap(True)
-        cgl.addWidget(note, 1, 0, 1, 2)
-        layout.addWidget(cg)
+        # ── 2 & 3. CAM TOGGLE BUTTONS (per-stage, data-driven) ──────
+        # Clicking SENDS the command; visual state updates ONLY from STATUS.
+        self._cam_s1_recording = False
+        self._cam_s2_recording = False
+        self._cam_s1_toggle = QPushButton("S1 Cam: OFF")
+        self._cam_s1_toggle.setCheckable(True)
+        self._cam_s1_toggle.setMinimumWidth(120)
+        self._cam_s1_toggle.setMinimumHeight(32)
+        self._cam_s1_toggle.clicked.connect(lambda: self._on_cam_toggle(1))
+        self._cam_s2_toggle = QPushButton("S2 Cam: OFF")
+        self._cam_s2_toggle.setCheckable(True)
+        self._cam_s2_toggle.setMinimumWidth(120)
+        self._cam_s2_toggle.setMinimumHeight(32)
+        self._cam_s2_toggle.clicked.connect(lambda: self._on_cam_toggle(2))
 
         # ── 4. VIDEO / VTX ──────────────────────────────────────
         vg = QGroupBox("Video / VTX"); vgl = QGridLayout(vg); vgl.setSpacing(4)
@@ -589,29 +584,48 @@ class CommandPanel(QWidget):
         layout.addWidget(vg)
 
         # ── 5. TELEMETRY ────────────────────────────────────────
-        tg = QGroupBox("Telemetry  [stage selector]"); tgl = QGridLayout(tg)
+        # Confirmed LoRa frequencies from STATUS — used to detect pending changes
+        self._lora_s1_confirmed = None
+        self._lora_s2_confirmed = None
+
+        tg = QGroupBox("Telemetry"); tgl = QGridLayout(tg)
+
+        # Localized target selector — replaces removed global stage selector
+        self._telem_btn_s1   = QPushButton("S1");   self._telem_btn_s1.setCheckable(True); self._telem_btn_s1.setChecked(True)
+        self._telem_btn_s2   = QPushButton("S2");   self._telem_btn_s2.setCheckable(True)
+        self._telem_btn_both = QPushButton("Both"); self._telem_btn_both.setCheckable(True)
+        for b in [self._telem_btn_s1, self._telem_btn_s2, self._telem_btn_both]:
+            b.setMinimumWidth(45); b.clicked.connect(self._telem_stage_sel)
+        tsel_row = QHBoxLayout(); tsel_row.setSpacing(3)
+        tsel_row.addWidget(QLabel("Target:"))
+        tsel_row.addWidget(self._telem_btn_s1); tsel_row.addWidget(self._telem_btn_s2); tsel_row.addWidget(self._telem_btn_both)
+        tgl.addLayout(tsel_row, 0, 0, 1, 3)
+
         self._telem_10hz_btn = self._mkbtn("10 Hz",     lambda: self._send(P.CMD_TELEM_HIGH))
-        self._telem_1hz_btn  = self._mkbtn(" 1 Hz",     lambda: self._send(P.CMD_TELEM_LOW))
+        self._telem_1hz_btn  = self._mkbtn("1 Hz",      lambda: self._send(P.CMD_TELEM_LOW))
         self._force_pkt_btn  = self._mkbtn("Force Pkt", lambda: self._send(P.CMD_FORCE_PACKET))
         self._get_status_btn = self._mkbtn("Get Status",lambda: self._send(P.CMD_GET_STATUS))
-        tgl.addWidget(self._telem_10hz_btn, 0, 0)
-        tgl.addWidget(self._telem_1hz_btn,  0, 1)
-        tgl.addWidget(self._force_pkt_btn,  1, 0)
-        tgl.addWidget(self._get_status_btn, 1, 1)
+        tgl.addWidget(self._telem_10hz_btn, 1, 0)
+        tgl.addWidget(self._telem_1hz_btn,  1, 1)
+        tgl.addWidget(self._force_pkt_btn,  2, 0)
+        tgl.addWidget(self._get_status_btn, 2, 1)
 
-        tgl.addWidget(QLabel("S1 LoRa MHz:"), 2, 0)
+        tgl.addWidget(QLabel("S1 LoRa MHz:"), 3, 0)
         _lora_s1_default = self._init_settings.get("lora_s1_freq", config.LORA_S1_FREQ_MHZ)
-        self._lora_s1_edit = QLineEdit(f"{_lora_s1_default:.3f}"); self._lora_s1_edit.setMaximumWidth(75)
-        tgl.addWidget(self._lora_s1_edit, 2, 1)
-        self._lora_set_s1_btn = self._mkbtn("Set S1", lambda: self._send_lora(1), "confirm")
-        tgl.addWidget(self._lora_set_s1_btn, 2, 2)
+        self._lora_s1_edit = QLineEdit(f"{_lora_s1_default:.3f}"); self._lora_s1_edit.setMaximumWidth(80)
+        tgl.addWidget(self._lora_s1_edit, 3, 1)
+        self._lora_set_s1_btn = self._mkbtn("Set S1", lambda: self._send_lora(1))
+        tgl.addWidget(self._lora_set_s1_btn, 3, 2)
 
-        tgl.addWidget(QLabel("S2 LoRa MHz:"), 3, 0)
+        tgl.addWidget(QLabel("S2 LoRa MHz:"), 4, 0)
         _lora_s2_default = self._init_settings.get("lora_s2_freq", config.LORA_S2_FREQ_MHZ)
-        self._lora_s2_edit = QLineEdit(f"{_lora_s2_default:.3f}"); self._lora_s2_edit.setMaximumWidth(75)
-        tgl.addWidget(self._lora_s2_edit, 3, 1)
-        self._lora_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_lora(2), "confirm")
-        tgl.addWidget(self._lora_set_s2_btn, 3, 2)
+        self._lora_s2_edit = QLineEdit(f"{_lora_s2_default:.3f}"); self._lora_s2_edit.setMaximumWidth(80)
+        tgl.addWidget(self._lora_s2_edit, 4, 1)
+        self._lora_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_lora(2))
+        tgl.addWidget(self._lora_set_s2_btn, 4, 2)
+
+        self._lora_s1_edit.textChanged.connect(lambda _: self._on_lora_text_changed(1))
+        self._lora_s2_edit.textChanged.connect(lambda _: self._on_lora_text_changed(2))
         layout.addWidget(tg)
 
         # ── 6. TEST / PAYLOAD ───────────────────────────────────
@@ -685,26 +699,90 @@ class CommandPanel(QWidget):
         ll.addWidget(self._log)
         layout.addWidget(lg)
 
-        self._refresh_stage_ui()
+        self._telem_refresh()
 
     # ------------------------------------------------------------------
-    def _stage_sel(self):
+    def _telem_stage_sel(self):
         sender = self.sender()
-        for b in [self._btn_s1, self._btn_s2, self._btn_both]: b.setChecked(b is sender)
-        self._refresh_stage_ui()
+        for b in [self._telem_btn_s1, self._telem_btn_s2, self._telem_btn_both]:
+            b.setChecked(b is sender)
+        self._telem_refresh()
 
-    def _refresh_stage_ui(self):
-        s2_in_scope = self._btn_s2.isChecked() or self._btn_both.isChecked()
+    def _telem_refresh(self):
+        s2_in_scope = self._telem_btn_s2.isChecked() or self._telem_btn_both.isChecked()
         sol_ok = s2_in_scope and (self._s2_ground_mode == P.GM_TEST_IDLE)
         self._sol_btn.setEnabled(sol_ok)
         self._sol_stage_lbl.setVisible(not s2_in_scope)
         self._fst_s2_btn.setEnabled(self._s2_ground_mode == P.GM_TEST_IDLE)
 
-    def _targets(self) -> list:
-        if self._btn_s1.isChecked():   return [1]
-        if self._btn_s2.isChecked():   return [2]
-        if self._btn_both.isChecked(): return [1, 2]
+    def _telem_targets(self) -> list:
+        if self._telem_btn_s1.isChecked():   return [1]
+        if self._telem_btn_s2.isChecked():   return [2]
+        if self._telem_btn_both.isChecked(): return [1, 2]
         return [1]
+
+    def _on_cam_toggle(self, stage: int):
+        """Send cam record command. Do NOT update toggle visuals — that comes from STATUS."""
+        if stage == 1:
+            cmd = P.CMD_CAM_RECORD_OFF if self._cam_s1_recording else P.CMD_CAM_RECORD_ON
+            radio = self._r1
+        else:
+            cmd = P.CMD_CAM_RECORD_OFF if self._cam_s2_recording else P.CMD_CAM_RECORD_ON
+            radio = self._r2
+        radio.send_frame(P.build_standard_frame(stage, cmd))
+        self._log_msg("SENT", cmd, stage)
+        if self._data.is_recording:
+            self._data.record_event(f"CMD {P.CMD_NAMES.get(cmd,'?')} → S{stage}")
+
+    def update_status_controls(self, stage: int, d: dict):
+        """Update cam toggles and VTX power highlights from confirmed STATUS data."""
+        # ── Camera toggle ────────────────────────────────────────────
+        cam = bool(d.get("cam_recording", 0))
+        if stage == 1:
+            self._cam_s1_recording = cam
+            btn = self._cam_s1_toggle
+        else:
+            self._cam_s2_recording = cam
+            btn = self._cam_s2_toggle
+        btn.blockSignals(True)
+        btn.setChecked(cam)
+        btn.setText(f"S{stage} Cam: ● REC" if cam else f"S{stage} Cam: OFF")
+        btn.setObjectName("rec_active" if cam else "")
+        btn.style().unpolish(btn); btn.style().polish(btn)
+        btn.blockSignals(False)
+
+        # ── VTX flight power highlight ───────────────────────────────
+        pwr = d.get("vtx_flight_power", -1)
+        btns = self._vp_s1_btns if stage == 1 else self._vp_s2_btns
+        for i, b in enumerate(btns):
+            b.setObjectName("confirm" if i == pwr else "")
+            b.style().unpolish(b); b.style().polish(b)
+
+        # ── LoRa confirmed frequency → remove "Set" highlight if in sync ──
+        freq = d.get("lora_freq_mhz")
+        if freq is not None:
+            if stage == 1:
+                self._lora_s1_confirmed = freq
+            else:
+                self._lora_s2_confirmed = freq
+            self._update_lora_highlight(stage)
+
+    def _on_lora_text_changed(self, stage: int):
+        self._update_lora_highlight(stage)
+
+    def _update_lora_highlight(self, stage: int):
+        """Green 'Set' button = typed freq differs from confirmed. Clear = in sync."""
+        edit      = self._lora_s1_edit      if stage == 1 else self._lora_s2_edit
+        btn       = self._lora_set_s1_btn   if stage == 1 else self._lora_set_s2_btn
+        confirmed = self._lora_s1_confirmed if stage == 1 else self._lora_s2_confirmed
+        try:
+            typed = float(edit.text())
+        except ValueError:
+            btn.setObjectName("danger"); btn.style().unpolish(btn); btn.style().polish(btn)
+            return
+        pending = (confirmed is None) or (abs(typed - confirmed) > 0.001)
+        btn.setObjectName("confirm" if pending else "")
+        btn.style().unpolish(btn); btn.style().polish(btn)
 
     def _radio(self, stage: int) -> RadioWorker:
         return self._r1 if stage == 1 else self._r2
@@ -725,11 +803,11 @@ class CommandPanel(QWidget):
         def span(m): return f'<span style="color:{colors.get(m,"#c9d1d9")};font-weight:bold">{P.ground_mode_name(m)}</span>'
         self._gm_s1_ind.setText(f"S1: {span(s1_mode)}"); self._gm_s1_ind.setTextFormat(Qt.RichText)
         self._gm_s2_ind.setText(f"S2: {span(s2_mode)}"); self._gm_s2_ind.setTextFormat(Qt.RichText)
-        self._refresh_stage_ui()
+        self._telem_refresh()
 
     # ------------------------------------------------------------------
     def _send(self, cmd: int):
-        for s in self._targets():
+        for s in self._telem_targets():
             self._radio(s).send_frame(P.build_standard_frame(s, cmd))
             self._log_msg("SENT", cmd, s)
             if self._data.is_recording:
@@ -766,7 +844,7 @@ class CommandPanel(QWidget):
         if self._data.is_recording: self._data.record_event(f"SET_VTX_POWER {label} → S{stage}")
 
     def _fire_sol(self):
-        if 2 not in self._targets(): self._log_msg("BLOCKED", P.CMD_FIRE_SOLENOID, 0, "Select S2 or Both"); return
+        if 2 not in self._telem_targets(): self._log_msg("BLOCKED", P.CMD_FIRE_SOLENOID, 0, "Select S2 or Both"); return
         if self._s2_ground_mode != P.GM_TEST_IDLE:
             self._log_msg("BLOCKED", P.CMD_FIRE_SOLENOID, 2, "S2 must be TEST_IDLE"); return
         self._r2.send_frame(P.build_standard_frame(2, P.CMD_FIRE_SOLENOID))
@@ -1193,7 +1271,7 @@ class MainWindow(QMainWindow):
         ctrl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         ctrl_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         ctrl_scroll.setFrameShape(QFrame.NoFrame)
-        ctrl_scroll.setFixedHeight(220)
+        ctrl_scroll.setFixedHeight(250)
         ctrl_scroll.setWidget(self._build_controls_bar())
         root.addWidget(ctrl_scroll)
 
@@ -1228,56 +1306,61 @@ class MainWindow(QMainWindow):
         g1l.addWidget(self._cmd_panel._gm_s2_ind, 3, 2, 1, 2)
         bar_layout.addWidget(g1)
 
-        # ── Group 2 — Stage + Camera (170px) ─────────────────────────
-        g2 = QGroupBox("Stage / Camera")
+        # ── Group 2 — RunCam (data-driven per-stage toggles) ─────────
+        g2 = QGroupBox("RunCam")
         g2.setObjectName("controls_group")
-        g2l = QGridLayout(g2)
-        g2l.setSpacing(2)
-        g2l.addWidget(self._cmd_panel._btn_s1,   0, 0)
-        g2l.addWidget(self._cmd_panel._btn_s2,   0, 1)
-        g2l.addWidget(self._cmd_panel._btn_both, 0, 2)
-        g2l.addWidget(self._cmd_panel._cam_rec_on_btn,  1, 0, 1, 2)
-        g2l.addWidget(self._cmd_panel._cam_rec_off_btn, 1, 2)
+        g2l = QVBoxLayout(g2)
+        g2l.setSpacing(4)
+        g2l.addWidget(self._cmd_panel._cam_s1_toggle)
+        g2l.addWidget(self._cmd_panel._cam_s2_toggle)
+        note2 = QLabel("State from STATUS only")
+        note2.setObjectName("telem_label"); note2.setAlignment(Qt.AlignCenter)
+        g2l.addWidget(note2)
         bar_layout.addWidget(g2)
 
-        # ── Group 3 — Video / VTX (260px) ────────────────────────────
+        # ── Group 3 — Video / VTX ────────────────────────────────────
         g3 = QGroupBox("Video / VTX")
         g3.setObjectName("controls_group")
         g3l = QGridLayout(g3)
         g3l.setSpacing(2)
-        g3l.addWidget(self._cmd_panel._video_on_btn,  0, 0)
-        g3l.addWidget(self._cmd_panel._video_off_btn, 0, 1)
-        g3l.addWidget(QLabel("S1 VTX:"),              1, 0)
-        g3l.addWidget(self._cmd_panel._vtx_s1_edit,   1, 1)
+        g3l.addWidget(self._cmd_panel._video_on_btn,   0, 0)
+        g3l.addWidget(self._cmd_panel._video_off_btn,  0, 1)
+        g3l.addWidget(QLabel("S1 VTX:"),               1, 0)
+        g3l.addWidget(self._cmd_panel._vtx_s1_edit,    1, 1)
         g3l.addWidget(self._cmd_panel._vtx_set_s1_btn, 1, 2)
-        g3l.addWidget(QLabel("S2 VTX:"),              2, 0)
-        g3l.addWidget(self._cmd_panel._vtx_s2_edit,   2, 1)
+        g3l.addWidget(QLabel("S2 VTX:"),               2, 0)
+        g3l.addWidget(self._cmd_panel._vtx_s2_edit,    2, 1)
         g3l.addWidget(self._cmd_panel._vtx_set_s2_btn, 2, 2)
+        g3l.addWidget(QLabel("S1 Flt Pwr:"),           3, 0)
         s1_pwr = QHBoxLayout()
-        for b in self._cmd_panel._vp_s1_btns:
-            s1_pwr.addWidget(b)
-        g3l.addLayout(s1_pwr, 3, 0, 1, 3)
+        for b in self._cmd_panel._vp_s1_btns: s1_pwr.addWidget(b)
+        g3l.addLayout(s1_pwr, 3, 1, 1, 2)
+        g3l.addWidget(QLabel("S2 Flt Pwr:"),           4, 0)
         s2_pwr = QHBoxLayout()
-        for b in self._cmd_panel._vp_s2_btns:
-            s2_pwr.addWidget(b)
-        g3l.addLayout(s2_pwr, 4, 0, 1, 3)
+        for b in self._cmd_panel._vp_s2_btns: s2_pwr.addWidget(b)
+        g3l.addLayout(s2_pwr, 4, 1, 1, 2)
         bar_layout.addWidget(g3)
 
-        # ── Group 4 — Telemetry / LoRa (230px) ───────────────────────
+        # ── Group 4 — Telemetry / LoRa (with local target selector) ──
         g4 = QGroupBox("Telemetry")
         g4.setObjectName("controls_group")
         g4l = QGridLayout(g4)
         g4l.setSpacing(2)
-        g4l.addWidget(self._cmd_panel._telem_10hz_btn, 0, 0)
-        g4l.addWidget(self._cmd_panel._telem_1hz_btn,  0, 1)
-        g4l.addWidget(self._cmd_panel._force_pkt_btn,  0, 2)
-        g4l.addWidget(self._cmd_panel._get_status_btn, 0, 3)
-        g4l.addWidget(QLabel("S1 LoRa:"),              1, 0)
-        g4l.addWidget(self._cmd_panel._lora_s1_edit,   1, 1)
-        g4l.addWidget(self._cmd_panel._lora_set_s1_btn, 1, 2)
-        g4l.addWidget(QLabel("S2 LoRa:"),              2, 0)
-        g4l.addWidget(self._cmd_panel._lora_s2_edit,   2, 1)
-        g4l.addWidget(self._cmd_panel._lora_set_s2_btn, 2, 2)
+        # Target selector row
+        g4l.addWidget(QLabel("Target:"),                    0, 0)
+        g4l.addWidget(self._cmd_panel._telem_btn_s1,        0, 1)
+        g4l.addWidget(self._cmd_panel._telem_btn_s2,        0, 2)
+        g4l.addWidget(self._cmd_panel._telem_btn_both,      0, 3)
+        g4l.addWidget(self._cmd_panel._telem_10hz_btn,      1, 0)
+        g4l.addWidget(self._cmd_panel._telem_1hz_btn,       1, 1)
+        g4l.addWidget(self._cmd_panel._force_pkt_btn,       1, 2)
+        g4l.addWidget(self._cmd_panel._get_status_btn,      1, 3)
+        g4l.addWidget(QLabel("S1 LoRa:"),                   2, 0)
+        g4l.addWidget(self._cmd_panel._lora_s1_edit,        2, 1)
+        g4l.addWidget(self._cmd_panel._lora_set_s1_btn,     2, 2)
+        g4l.addWidget(QLabel("S2 LoRa:"),                   3, 0)
+        g4l.addWidget(self._cmd_panel._lora_s2_edit,        3, 1)
+        g4l.addWidget(self._cmd_panel._lora_set_s2_btn,     3, 2)
         bar_layout.addWidget(g4)
 
         # ── Group 5 — Test / Payload (210px) ─────────────────────────
@@ -1317,8 +1400,10 @@ class MainWindow(QMainWindow):
         g7.setObjectName("controls_group")
         g7l = QVBoxLayout(g7)
         g7l.setSpacing(2)
-        open_log_btn = QPushButton("📋  Open Log Window")
+        open_log_btn = QPushButton("Open Log Window")
         open_log_btn.setObjectName("confirm")
+        open_log_btn.setMinimumHeight(44)
+        open_log_btn.setMinimumWidth(130)
         open_log_btn.clicked.connect(self._show_log_window)
         g7l.addWidget(open_log_btn)
         self._last_cmd_label = QLabel("—")
@@ -1335,7 +1420,7 @@ class MainWindow(QMainWindow):
     def _set_splitter_sizes(self):
         size = self.size()
         w = size.width()
-        h = max(1, size.height() - 200 - 2)
+        h = max(1, size.height() - 250 - 2)
         self._h_splitter.setSizes([w // 2, w // 2])
         self._left_splitter.setSizes([h // 2, h // 2])
         self._right_splitter.setSizes([h // 2, h // 2])
@@ -1444,6 +1529,7 @@ class MainWindow(QMainWindow):
             self._s2_ground_mode = gm
         self._cmd_panel.update_ground_modes(
             self._s1_ground_mode, self._s2_ground_mode)
+        self._cmd_panel.update_status_controls(stage, d)
         if self._data_rec.is_recording:
             self._data_rec.record_status(stage, d)
 

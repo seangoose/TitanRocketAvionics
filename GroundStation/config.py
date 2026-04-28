@@ -47,9 +47,9 @@ VIDEO_FPS      = 30
 #  rocket. Frequencies must stay within 902.0–928.0 MHz (USA ISM band).
 # -----------------------------------------------------------------------------
 
-LORA_S1_FREQ_MHZ   = 915.0   # Stage 1 LoRa starting frequency
-LORA_S2_FREQ_MHZ   = 915.0   # Stage 2 LoRa starting frequency
-                               # Use different frequencies if interference observed
+LORA_S1_FREQ_MHZ   = 905.0   # Stage 1 LoRa starting frequency
+LORA_S2_FREQ_MHZ   = 925.0   # Stage 2 LoRa starting frequency
+                               # Separated by 20 MHz to prevent inter-stage interference
 
 # VTX frequencies — display only, not used to command radio hardware directly.
 # These are updated by STATUS packets received from the rocket.
