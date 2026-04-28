@@ -783,7 +783,8 @@ void vtxSendCmd(uint8_t cmd, const uint8_t* data, uint8_t dataLen) {
   frame[i++]=0x00; frame[i++]=0xAA; frame[i++]=0x62;
   frame[i++]=dataLen+1; frame[i++]=cmd;
   for (uint8_t d=0;d<dataLen&&i<11;d++) frame[i++]=data[d];
-  frame[i++]=crc8_dvbs2(frame+2, i-2);
+  frame[i] = crc8_dvbs2(frame+2, i-2);
+  i++;
   VTX_SERIAL.write(frame,i); VTX_SERIAL.flush();
 }
 
@@ -854,8 +855,9 @@ static void runcamSendCmd(uint8_t cmdId, const uint8_t* data, uint8_t dataLen) {
   frame[i++] = cmdId;
   frame[i++] = dataLen;
   for (uint8_t d=0;d<dataLen&&i<11;d++) frame[i++]=data[d];
-  frame[i++] = crc8_dvbs2(frame, i);
-  CAM_SERIAL.write(frame,i); CAM_SERIAL.flush();
+  frame[i] = crc8_dvbs2(frame, i);
+  i++;
+  CAM_SERIAL.write(frame,i);
 }
 
 void runcamStartRecording() {
