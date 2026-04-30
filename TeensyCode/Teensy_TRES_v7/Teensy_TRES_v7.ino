@@ -175,6 +175,7 @@
 #define OSD_REG_DMAL  0x06
 #define OSD_REG_DMDI  0x07
 #define OSD_REG_STAT  0xA0
+#define OSD_REG_OSDBL 0x6C
 
 // VM0 bits
 #define OSD_VM0_RESET    0x02
@@ -783,16 +784,38 @@ void printSerialStatus(uint8_t cmd, uint8_t result) {
 // ================================================================
 //  VTX SMARTAUDIO  (AKK A1918)
 //  Serial6 TX = pin 24.  Half-duplex 4800 baud.
-//  Frame: [0x00][0xAA][0x62][LEN][CMD][DATA][CRC8/DVB-S2]
+//  Frame: [0x00 dummy][0xAA][0x55][CMD][LEN][DATA][CRC8/DVB-S2]
 // ================================================================
 void vtxSendCmd(uint8_t cmd, const uint8_t* data, uint8_t dataLen) {
-  uint8_t frame[12]; uint8_t i=0;
-  frame[i++]=0x00; frame[i++]=0xAA; frame[i++]=0x62;
-  frame[i++]=dataLen+1; frame[i++]=cmd;
-  for (uint8_t d=0;d<dataLen&&i<11;d++) frame[i++]=data[d];
-  frame[i] = crc8_dvbs2(frame+2, i-2);
-  i++;
-  VTX_SERIAL.write(frame,i); VTX_SERIAL.flush();
+  uint8_t frame[12];
+  uint8_t i = 0;
+
+  // AKK/RDQ workaround: 0x00 dummy byte pulls the SA line low before transmission.
+  // This is required for AKK devices per confirmed Betaflight source code.
+  // The dummy byte is NOT part of the SA frame and is excluded from CRC.
+  frame[i++] = 0x00;
+
+  // SmartAudio start code — MUST be 0xAA 0x55 per TBS SA spec rev08/09
+  // Previous firmware used 0x62 as second byte — this was wrong and caused
+  // every SA command to be silently discarded by the AKK A1918 VTX.
+  frame[i++] = 0xAA;
+  frame[i++] = 0x55;
+
+  // Command byte comes BEFORE length byte per SA spec
+  // Previous firmware had these reversed — another reason all commands failed
+  frame[i++] = cmd;
+  frame[i++] = (uint8_t)(dataLen + 1);  // LEN = payload bytes + 1 (CRC byte)
+
+  for (uint8_t d = 0; d < dataLen && i < 11; d++) {
+    frame[i++] = data[d];
+  }
+
+  // CRC covers the entire SA frame: from 0xAA through last payload byte.
+  // Starts at frame+1 (skipping the 0x00 dummy), covers i-1 bytes.
+  frame[i++] = crc8_dvbs2(frame + 1, i - 1);
+
+  VTX_SERIAL.write(frame, i);
+  VTX_SERIAL.flush();
 }
 
 void vtxSetPower(uint8_t level) {
@@ -823,8 +846,21 @@ bool vtxSetFrequency(uint16_t targetMHz) {
 bool initVTX() {
   VTX_SERIAL.begin(4800);
   delay(400);
-  vtxSetPower(VTX_PWR_OFF);   // 25 mW at boot — setGroundMode will apply correct level
-  Serial.println("[VTX] Serial6 init — 25 mW (boot default)");
+  vtxSetPower(VTX_PWR_OFF);
+  Serial.println("[VTX] Serial6 init — 25mW boot power, SA frames corrected");
+
+  // Send SA GET_SETTINGS to probe VTX response.
+  // AKK A1918 will reply with its current settings if the UART path is intact.
+  // We do not parse the response here — just log whether bytes come back within 200ms.
+  vtxSendCmd(0x03, nullptr, 0);  // GET_SETTINGS — modified command per SA V2 spec
+  delay(200);
+  bool vtxResponded = (VTX_SERIAL.available() > 0);
+  while (VTX_SERIAL.available()) VTX_SERIAL.read();  // Flush response bytes
+  if (!vtxResponded) {
+    Serial.println("[VTX] WARNING — no SA response. Check pin 24 wiring and VTX power.");
+  } else {
+    Serial.println("[VTX] SA response received — VTX is live");
+  }
   return true;
 }
 
@@ -833,11 +869,12 @@ bool initVTX() {
 //  Serial1 TX (pin 1) → RunCam RX
 //  Serial1 RX (pin 0) ← RunCam TX  (not parsed, used for future feedback)
 //
-//  Frame: [0xCC][CMD_ID][DATA_LEN][DATA...][CRC8/DVB-S2]
-//  CRC covers all bytes from 0xCC to last DATA byte.
+//  Frame: [0xCC][CMD_ID][DATA...][CRC8/poly-0x31]
+//  No length byte. Frame size is fixed per command.
+//  CRC covers all bytes from 0xCC through last DATA byte.
 //
-//  CMD_ID 0x00 = Get device info (LEN=0)
-//  CMD_ID 0x01 = Camera control action (LEN=1)
+//  CMD_ID 0x00 = Get device info — [0xCC][0x00][CRC] = 3 bytes
+//  CMD_ID 0x01 = Camera control  — [0xCC][0x01][ACTION][CRC] = 4 bytes
 //    Action 0x03 = START_RECORDING  (RCDP v2 explicit)
 //    Action 0x04 = STOP_RECORDING   (RCDP v2 explicit)
 //
@@ -856,15 +893,40 @@ bool initVTX() {
 #define RCDP_ACT_START    0x03   // Explicit start recording (v2)
 #define RCDP_ACT_STOP     0x04   // Explicit stop recording  (v2)
 
+// CRC8 for RunCam Device Protocol — polynomial 0x31
+// This is DIFFERENT from crc8_dvbs2 (poly 0xD5) used for SmartAudio.
+// RunCam spec confirmed at support.runcam.com/hc/en-us/articles/360014537794
+static uint8_t crc8_rcdp(const uint8_t* buf, uint8_t len) {
+  uint8_t crc = 0x00;
+  while (len--) {
+    crc ^= *buf++;
+    for (uint8_t i = 8; i > 0; i--) {
+      crc = (crc & 0x80) ? ((crc << 1) ^ 0x31) : (crc << 1);
+    }
+  }
+  return crc;
+}
+
 static void runcamSendCmd(uint8_t cmdId, const uint8_t* data, uint8_t dataLen) {
-  uint8_t frame[12]; uint8_t i=0;
-  frame[i++] = RCDP_HEADER;
+  // RunCam Device Protocol — official spec confirmed at support.runcam.com
+  // Frame format has NO length byte. Frames are fixed length per command:
+  //   Get Info (0x00):      [0xCC][0x00][CRC]           = 3 bytes
+  //   Camera Control (0x01):[0xCC][0x01][ACTION][CRC]   = 4 bytes
+  //
+  // Previous firmware inserted a dataLen byte after cmdId — this was WRONG
+  // and caused every command to be parsed incorrectly by the RunCam.
+  // Previous firmware used crc8_dvbs2 (poly 0xD5) — this was WRONG.
+  // Correct CRC uses polynomial 0x31.
+  uint8_t frame[8];
+  uint8_t i = 0;
+  frame[i++] = RCDP_HEADER;   // 0xCC
   frame[i++] = cmdId;
-  frame[i++] = dataLen;
-  for (uint8_t d=0;d<dataLen&&i<11;d++) frame[i++]=data[d];
-  frame[i] = crc8_dvbs2(frame, i);
-  i++;
-  CAM_SERIAL.write(frame,i);
+  for (uint8_t d = 0; d < dataLen && i < 7; d++) {
+    frame[i++] = data[d];
+  }
+  frame[i++] = crc8_rcdp(frame, i);   // CRC covers all preceding bytes
+  CAM_SERIAL.write(frame, i);
+  CAM_SERIAL.flush();
 }
 
 void runcamStartRecording() {
@@ -885,12 +947,26 @@ void runcamStopRecording() {
 
 bool initRunCam() {
   CAM_SERIAL.begin(CAM_BAUD);
-  delay(200);
-  // Request device info — confirms camera is alive on the bus
-  // Response is not parsed but will appear on Serial1 RX for future use
-  runcamSendCmd(RCDP_CMD_INFO, nullptr, 0);
-  Serial.println("[CAM] Serial1 init — info request sent to RunCam");
-  return true;
+  delay(500);  // Allow RunCam to fully boot before sending commands
+  runcamSendCmd(RCDP_CMD_INFO, nullptr, 0);  // 0x00 get device info
+
+  // RunCam responds to GET_DEVICE_INFO with 5 bytes if camera is live.
+  // Wait up to 300ms for any response.
+  uint32_t t0 = millis();
+  while (!CAM_SERIAL.available() && (millis() - t0) < 300);
+
+  bool camResponded = (CAM_SERIAL.available() > 0);
+  while (CAM_SERIAL.available()) CAM_SERIAL.read();  // Flush
+
+  if (!camResponded) {
+    faultFlags |= FAULT_CAM;
+    Serial.println("[CAM] WARNING — no RCDP response. Verify RunCam power and TX/RX wiring.");
+    Serial.println("[CAM] RunCam must be fully booted BEFORE Teensy power-on.");
+  } else {
+    Serial.println("[CAM] RCDP response received — RunCam is live");
+    faultFlags &= ~FAULT_CAM;  // Clear fault if previously set
+  }
+  return camResponded;
 }
 
 // ================================================================
@@ -969,6 +1045,8 @@ bool initOSD() {
     osdWrite(OSD_REG_VM0, OSD_VM0_ENABLE);  // attempt to enable passthrough even on SPI fault
     return false;
   }
+  osdWrite(OSD_REG_OSDBL, 0x00);          // Enable auto black level — required after every reset
+  osdWrite(OSD_REG_DMM, 0x40);            // Set 8-bit character write mode
   osdWrite(OSD_REG_VM0, OSD_VM0_ENABLE); delay(50);
 
 #if OSD_FORCE_FORMAT == OSD_FMT_NTSC
@@ -983,7 +1061,12 @@ bool initOSD() {
   uint32_t t0=millis();
   while (millis()-t0 < 500) {
     uint8_t stat=osdRead(OSD_REG_STAT);
-    if (stat&OSD_STAT_PAL_DET)  { osdVideoRows=OSD_ROWS_PAL;  Serial.println("[OSD] Detected PAL");  detected=true; break; }
+    if (stat&OSD_STAT_PAL_DET) {
+      osdVideoRows = OSD_ROWS_PAL;
+      osdWrite(OSD_REG_VM0, OSD_VM0_ENABLE | OSD_VM0_PAL);  // Apply PAL timing to VM0
+      Serial.println("[OSD] Detected PAL — VM0 updated");
+      detected = true; break;
+    }
     if (stat&OSD_STAT_NTSC_DET) { osdVideoRows=OSD_ROWS_NTSC; Serial.println("[OSD] Detected NTSC"); detected=true; break; }
     delay(10);
   }
