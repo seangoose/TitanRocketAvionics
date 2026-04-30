@@ -1242,12 +1242,12 @@ class MainWindow(QMainWindow):
 
         # ── Map ──────────────────────────────────────────────────────
         self._map = MapWidget()
-        self._map.setMinimumHeight(320)
+        self._map.setMinimumHeight(180)
 
         # ── GPS panel (bottom right) ──────────────────────────────────
         self._gps_panel = GPSPanel()
         gps_container = QWidget()
-        gps_container.setMinimumHeight(500)
+        gps_container.setMinimumHeight(340)
         gps_vbox = QVBoxLayout(gps_container)
         gps_vbox.setContentsMargins(2, 2, 2, 2)
         gps_vbox.setSpacing(3)
