@@ -293,7 +293,7 @@ class VideoPanel(QGroupBox):
         self._label = QLabel(f"Stage {stage} — No Signal")
         self._label.setObjectName("video_placeholder")
         self._label.setAlignment(Qt.AlignCenter)
-        self._label.setMinimumSize(300, 400)
+        self._label.setMinimumSize(300, 225)
         self._label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self._label)
         self._status = QLabel("Connecting…"); self._status.setObjectName("telem_label")
@@ -1237,8 +1237,8 @@ class MainWindow(QMainWindow):
         # ── Video panels ─────────────────────────────────────────────
         self._video_s2 = VideoPanel(2)
         self._video_s1 = VideoPanel(1)
-        self._video_s2.setMinimumHeight(420)
-        self._video_s1.setMinimumHeight(420)
+        self._video_s2.setMinimumHeight(320)
+        self._video_s1.setMinimumHeight(320)
 
         # ── Map ──────────────────────────────────────────────────────
         self._map = MapWidget()
