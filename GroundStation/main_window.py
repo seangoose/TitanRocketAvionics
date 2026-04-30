@@ -293,7 +293,7 @@ class VideoPanel(QGroupBox):
         self._label = QLabel(f"Stage {stage} — No Signal")
         self._label.setObjectName("video_placeholder")
         self._label.setAlignment(Qt.AlignCenter)
-        self._label.setMinimumSize(300, 225)
+        self._label.setMinimumSize(300, 400)
         self._label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self._label)
         self._status = QLabel("Connecting…"); self._status.setObjectName("telem_label")
@@ -650,6 +650,13 @@ class CommandPanel(QWidget):
         tstl.addWidget(self._sol_stage_lbl, 1, 0, 1, 2)
         tstl.addWidget(self._mkbtn("Force Pkt",  lambda: self._send(P.CMD_FORCE_PACKET)), 2, 0)
         tstl.addWidget(self._mkbtn("Get Status", lambda: self._send(P.CMD_GET_STATUS)),   2, 1)
+        self._direct_sol_btn = self._mkbtn(
+            "⚡ Direct MOSFET Fire  [S2 — no mode gate]",
+            self._direct_fire_sol, "danger")
+        self._direct_sol_btn.setToolTip(
+            "Sends CMD_FIRE_SOLENOID directly to S2 regardless of ground mode.\n"
+            "Use when the gated button above is blocked but the MOSFET must fire.")
+        tstl.addWidget(self._direct_sol_btn, 3, 0, 1, 2)
         layout.addWidget(tst)
 
         # ── 7. FULL SYSTEM TEST — BATTERY EVALUATION ────────────
@@ -868,6 +875,22 @@ class CommandPanel(QWidget):
         self._r2.send_frame(P.build_standard_frame(2, P.CMD_FIRE_SOLENOID))
         self._log_msg("SENT ⚠", P.CMD_FIRE_SOLENOID, 2, "Water payload test")
         if self._data.is_recording: self._data.record_event("CMD FIRE_SOLENOID → S2")
+
+    def _direct_fire_sol(self):
+        reply = QMessageBox.warning(
+            self, "Direct MOSFET Fire",
+            "Send CMD_FIRE_SOLENOID directly to S2 radio.\n\n"
+            "This bypasses the TEST_IDLE gate — the Teensy will fire the MOSFET "
+            "regardless of current ground mode.\n\n"
+            "Proceed?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._r2.send_frame(P.build_standard_frame(2, P.CMD_FIRE_SOLENOID))
+        self._log_msg("SENT ⚠", P.CMD_FIRE_SOLENOID, 2, "Direct MOSFET fire (no mode gate)")
+        if self._data.is_recording: self._data.record_event("CMD DIRECT_FIRE_SOLENOID → S2")
 
     def _send_full_sys_test(self, stages: list):
         not_ready = []
@@ -1213,8 +1236,8 @@ class MainWindow(QMainWindow):
         # ── Video panels ─────────────────────────────────────────────
         self._video_s2 = VideoPanel(2)
         self._video_s1 = VideoPanel(1)
-        self._video_s2.setMinimumHeight(320)
-        self._video_s1.setMinimumHeight(320)
+        self._video_s2.setMinimumHeight(420)
+        self._video_s1.setMinimumHeight(420)
 
         # ── Map ──────────────────────────────────────────────────────
         self._map = MapWidget()

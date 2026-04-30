@@ -7,7 +7,7 @@
 import os
 from PyQt5.QtCore    import QUrl, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
 
 import config
 
@@ -45,15 +45,26 @@ class MapWidget(QWidget):
         self._view = QWebEngineView()
         self._page = SilentPage(self._view)
         self._view.setPage(self._page)
+
+        # Allow the page to access other local file:// resources (tiles, leaflet).
+        # setHtml() assigns a data: origin which blocks local file loads; using
+        # load(file://) avoids that.  LocalContentCanAccessLocalUrls is the belt-
+        # and-suspenders safety net for any remaining cross-file restrictions.
+        self._view.settings().setAttribute(
+            QWebEngineSettings.LocalContentCanAccessLocalUrls, True)
+
         layout.addWidget(self._view)
 
-        # Load the Leaflet HTML template with Python-injected constants
+        # Write the processed HTML (with substituted coords) to a file so we can
+        # load it via file:// — setHtml() assigns a data: origin which blocks all
+        # relative file:// resources (Leaflet JS/CSS, tile PNGs).
         html = self._build_html()
-        # Use a file base URL so relative tile_cache/ paths resolve correctly
-        base_url = QUrl.fromLocalFile(
-            os.path.abspath("assets/map.html")
+        live_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "assets", "map_live.html"
         )
-        self._view.setHtml(html, base_url)
+        with open(live_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        self._view.load(QUrl.fromLocalFile(live_path))
 
     def _build_html(self) -> str:
         """Read the map.html template and substitute Python config values."""
