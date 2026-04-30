@@ -812,7 +812,8 @@ void vtxSendCmd(uint8_t cmd, const uint8_t* data, uint8_t dataLen) {
 
   // CRC covers the entire SA frame: from 0xAA through last payload byte.
   // Starts at frame+1 (skipping the 0x00 dummy), covers i-1 bytes.
-  frame[i++] = crc8_dvbs2(frame + 1, i - 1);
+  uint8_t vtxCrcLen = i - 1;
+  frame[i++] = crc8_dvbs2(frame + 1, vtxCrcLen);
 
   VTX_SERIAL.write(frame, i);
   VTX_SERIAL.flush();
@@ -924,7 +925,8 @@ static void runcamSendCmd(uint8_t cmdId, const uint8_t* data, uint8_t dataLen) {
   for (uint8_t d = 0; d < dataLen && i < 7; d++) {
     frame[i++] = data[d];
   }
-  frame[i++] = crc8_rcdp(frame, i);   // CRC covers all preceding bytes
+  uint8_t rcdpCrcLen = i;
+  frame[i++] = crc8_rcdp(frame, rcdpCrcLen);   // CRC covers all preceding bytes
   CAM_SERIAL.write(frame, i);
   CAM_SERIAL.flush();
 }
