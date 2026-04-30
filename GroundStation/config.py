@@ -22,7 +22,7 @@ M0_S2_BAUD     = 115200
 # Baud rate: 57600 per Featherweight documentation (Appendix A).
 # Verify against your unit's serial output if packets appear garbled.
 FW_GPS_PORT    = "/dev/tres_fw_gps"
-FW_GPS_BAUD    = 57600
+FW_GPS_BAUD    = 115200
 
 # -----------------------------------------------------------------------------
 #  VIDEO CAPTURE

@@ -199,7 +199,7 @@ class VideoWorker(QThread):
                         self._writer.write(frame)
 
                 # ── Emit QImage for display ───────────────────────────
-                display = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                display = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb.shape
                 img = QImage(rgb.data, w, h, ch * w,
