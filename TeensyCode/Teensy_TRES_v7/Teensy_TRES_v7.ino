@@ -1045,7 +1045,6 @@ bool initOSD() {
     osdWrite(OSD_REG_VM0, OSD_VM0_ENABLE);  // attempt to enable passthrough even on SPI fault
     return false;
   }
-  osdWrite(OSD_REG_OSDBL, 0x00);          // Enable auto black level — required after every reset
   osdWrite(OSD_REG_DMM, 0x40);            // Set 8-bit character write mode
   osdWrite(OSD_REG_VM0, OSD_VM0_ENABLE); delay(50);
 
