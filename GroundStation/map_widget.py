@@ -51,7 +51,7 @@ class MapWidget(QWidget):
         # load(file://) avoids that.  LocalContentCanAccessLocalUrls is the belt-
         # and-suspenders safety net for any remaining cross-file restrictions.
         self._view.settings().setAttribute(
-            QWebEngineSettings.LocalContentCanAccessLocalUrls, True)
+            QWebEngineSettings.LocalContentCanAccessFileUrls, True)
 
         layout.addWidget(self._view)
 

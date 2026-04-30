@@ -1140,6 +1140,7 @@ class TestStatsPanel(QWidget):
 class GPSPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setMinimumHeight(130)
         g = QGridLayout(self)
         self.conn_lbl = QLabel("⚫ Disconnected"); self.conn_lbl.setObjectName("status_err")
         g.addWidget(QLabel("Status:"),    0, 0); g.addWidget(self.conn_lbl, 0, 1, 1, 3)
@@ -1246,7 +1247,7 @@ class MainWindow(QMainWindow):
         # ── GPS panel (bottom right) ──────────────────────────────────
         self._gps_panel = GPSPanel()
         gps_container = QWidget()
-        gps_container.setMinimumHeight(320)
+        gps_container.setMinimumHeight(500)
         gps_vbox = QVBoxLayout(gps_container)
         gps_vbox.setContentsMargins(2, 2, 2, 2)
         gps_vbox.setSpacing(3)

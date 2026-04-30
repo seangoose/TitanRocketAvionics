@@ -43,12 +43,28 @@
       padding:6px 14px; border-radius:6px;
       font-size:12px; font-family:monospace; pointer-events:none;
     }
+    #no-gps-overlay {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      z-index:1500; text-align:center; pointer-events:none;
+    }
+    #no-gps-overlay .icon { font-size:32px; display:block; margin-bottom:8px; opacity:0.6; }
+    #no-gps-overlay .msg  {
+      background:rgba(22,33,62,0.90); color:#8b9dc3;
+      padding:10px 20px; border-radius:8px;
+      font-family:monospace; font-size:13px; border:1px solid #0f3460;
+      white-space:nowrap;
+    }
   </style>
 </head>
 <body>
 
 <div id="map"></div>
 <div id="tile-warning">Tile cache missing — run: python3 setup_offline.py</div>
+<div id="no-gps-overlay">
+  <span class="icon">📡</span>
+  <div class="msg">Waiting for Featherweight GPS…<br>No tracker position received yet.</div>
+</div>
 
 <div id="info-overlay">
   <div class="row"><span class="lbl">S1</span><span id="s1-state">—</span></div>
@@ -156,6 +172,7 @@ L.control.layers({},{
 // ═══════════════════════════════════════════════════════════════════════
 
 function updateRocketGPS(stage, lat, lon, altFt, vertVel, name) {
+  document.getElementById('no-gps-overlay').style.display = 'none';
   var ll  = [lat, lon];
   var tip = name + '\n' + altFt.toFixed(0) + ' ft  ' + vertVel.toFixed(0) + ' fps';
   if (stage === 1) {
@@ -205,6 +222,7 @@ function clearTracks() {
   if (gps2Marker) { map.removeLayer(gps2Marker); gps2Marker=null; }
   ['s1-state','s1-alt','s1-vel','s2-state','s2-alt','s2-vel','gps-s1','gps-s2']
     .forEach(function(id){ document.getElementById(id).textContent='—'; });
+  document.getElementById('no-gps-overlay').style.display = 'block';
 }
 </script>
 </body>
