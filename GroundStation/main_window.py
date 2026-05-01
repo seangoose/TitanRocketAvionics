@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime
 
 from PyQt5.QtCore    import Qt, QTimer, pyqtSlot, pyqtSignal
-from PyQt5.QtGui     import QPixmap
+from PyQt5.QtGui     import QPixmap, QTransform
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QGroupBox, QTextEdit,
@@ -303,8 +303,9 @@ class VideoPanel(QGroupBox):
 
     def update_frame(self, stage: int, img):
         if stage != self.stage: return
-        pix = QPixmap.fromImage(img).scaled(
-            self._label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pix = QPixmap.fromImage(img)
+        pix = pix.transformed(QTransform().rotate(90), Qt.SmoothTransformation)
+        pix = pix.scaled(self._label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._label.setPixmap(pix)
 
     def set_status(self, msg: str):
