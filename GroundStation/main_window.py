@@ -1771,13 +1771,13 @@ class MainWindow(QMainWindow):
         old_worker.wait(2000)
 
         try: old_worker.frame_ready.disconnect(panel.update_frame)
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
         try: old_worker.status_message.disconnect()
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
         try: old_worker.recording_changed.disconnect()
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
         try: old_worker.connection_changed.disconnect()
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
 
         self._showcase_worker = VideoFileWorker(
             config.SHOWCASE_STAGE,
@@ -1816,17 +1816,17 @@ class MainWindow(QMainWindow):
             panel = self._video_s1 if config.SHOWCASE_STAGE == 1 else self._video_s2
 
             try: self._showcase_worker.frame_ready.disconnect(panel.update_frame)
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
             try:
                 if self._sc_status_slot:
                     self._showcase_worker.status_message.disconnect(self._sc_status_slot)
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
             try:
                 if self._sc_conn_slot:
                     self._showcase_worker.connection_changed.disconnect(self._sc_conn_slot)
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
             try: self._showcase_worker.recording_changed.disconnect()
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
 
             if config.SHOWCASE_STAGE == 1:
                 live_worker = self._vid_s1
