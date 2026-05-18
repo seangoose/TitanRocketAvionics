@@ -101,6 +101,69 @@ def download_site(key: str, site: dict) -> tuple:
     return total, skipped, failed
 
 
+def download_bbox(name: str, min_lat: float, max_lat: float,
+                  min_lon: float, max_lon: float,
+                  min_zoom: int = 10, max_zoom: int = 17,
+                  force: bool = False) -> tuple:
+    """
+    Download all tiles covering an explicit lat/lon bounding box.
+    If force=True, re-downloads tiles that already exist in the cache.
+    Returns (downloaded, skipped, failed).
+    """
+    total   = 0
+    skipped = 0
+    failed  = 0
+    sd_idx  = 0
+
+    os.makedirs(TILE_CACHE_DIR, exist_ok=True)
+
+    for zoom in range(min_zoom, max_zoom + 1):
+        x1, y1 = deg2tile(max_lat, min_lon, zoom)   # top-left tile
+        x2, y2 = deg2tile(min_lat, max_lon, zoom)   # bottom-right tile
+        x_min, x_max = min(x1, x2), max(x1, x2)
+        y_min, y_max = min(y1, y2), max(y1, y2)
+        count = (x_max - x_min + 1) * (y_max - y_min + 1)
+        print(f"  Zoom {zoom:2d}: {count:5d} tiles  (x {x_min}-{x_max}, y {y_min}-{y_max})")
+
+        for x in range(x_min, x_max + 1):
+            for y in range(y_min, y_max + 1):
+                out_dir  = os.path.join(TILE_CACHE_DIR, str(zoom), str(x))
+                out_path = os.path.join(out_dir, f"{y}.png")
+                os.makedirs(out_dir, exist_ok=True)
+
+                if not force and os.path.exists(out_path):
+                    skipped += 1
+                    continue
+
+                sub = SUBDOMAINS[sd_idx % len(SUBDOMAINS)]
+                sd_idx += 1
+                url = (TILE_URL
+                       .replace("{s}", sub)
+                       .replace("{z}", str(zoom))
+                       .replace("{x}", str(x))
+                       .replace("{y}", str(y)))
+                try:
+                    resp = requests.get(url, headers=HEADERS, timeout=10)
+                    if resp.status_code == 200:
+                        with open(out_path, "wb") as f:
+                            f.write(resp.content)
+                        total += 1
+                        print(f"    ✓ {zoom}/{x}/{y}  "
+                              f"[+{total} cached]", end="\r")
+                    else:
+                        failed += 1
+                        print(f"\n    ✗ HTTP {resp.status_code}: {url}")
+                except requests.RequestException as e:
+                    failed += 1
+                    print(f"\n    ✗ {e}")
+
+                time.sleep(DELAY_S)
+
+        print()  # newline after final \r
+
+    return total, skipped, failed
+
+
 if __name__ == "__main__":
     # Determine which sites to download
     requested = [a.upper() for a in sys.argv[1:]]
@@ -131,6 +194,22 @@ if __name__ == "__main__":
         grand_skip  += sk
         grand_fail  += fa
         print(f"  → Downloaded: {dl}  Skipped (cached): {sk}  Failed: {fa}\n")
+
+    print("\n━━━  FAR Southeast patch (force-refresh explicit bbox)  ━━━")
+    bbox_dl, bbox_sk, bbox_fa = download_bbox(
+        name="FAR_SE_PATCH",
+        min_lat=35.31598,
+        max_lat=35.38401,
+        min_lon=-117.84893,
+        max_lon=-117.75624,
+        min_zoom=10,
+        max_zoom=17,
+        force=False   # Set to True only if tiles appear corrupted
+    )
+    grand_total += bbox_dl
+    grand_skip  += bbox_sk
+    grand_fail  += bbox_fa
+    print(f"  → Downloaded: {bbox_dl}  Skipped (cached): {bbox_sk}  Failed: {bbox_fa}")
 
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"All done.  Downloaded: {grand_total}  "

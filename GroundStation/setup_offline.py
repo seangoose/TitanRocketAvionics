@@ -216,6 +216,15 @@ def verify_offline():
         else:
             issues.append(f"MISSING: {site['name']} center tile at zoom {check_zoom}")
 
+    # FAR SE patch center tile check
+    se_check_zoom = 15
+    se_x, se_y = deg2tile(35.35, -117.76, se_check_zoom)
+    se_tile = os.path.join(TILE_CACHE_DIR, str(se_check_zoom), str(se_x), f"{se_y}.png")
+    if os.path.exists(se_tile):
+        print(f"  ✓  FAR SE patch center tile at zoom {se_check_zoom} present")
+    else:
+        issues.append("MISSING: FAR SE patch center tile — run cache_tiles.py to download")
+
     # Count total cached tiles
     tile_count = sum(
         len(files) for _, _, files in os.walk(TILE_CACHE_DIR)

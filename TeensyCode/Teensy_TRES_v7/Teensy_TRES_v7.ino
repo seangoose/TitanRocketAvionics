@@ -104,7 +104,7 @@
 #define RATE_SD_MS          10   // 100 Hz
 #define RATE_OSD_MS        200   // 5 Hz
 #define RATE_DEBUG_MS      500   // 2 Hz
-#define TELEM_RATE_HIGH_MS 100   // 10 Hz  (LAUNCH_READY default)
+#define TELEM_RATE_HIGH_MS 200   // 5 Hz (max achievable at SF8/125kHz)  (LAUNCH_READY default)
 #define TELEM_RATE_LOW_MS 1000   // 1 Hz   (PAD_IDLE fixed)
 #define HEARTBEAT_MS     60000UL // 60 s   (TEST_IDLE and PAD_IDLE)
 
@@ -370,6 +370,7 @@ void   sendStatusPacket(uint8_t cmd, uint8_t result);
 void   printSerialStatus(uint8_t cmd, uint8_t result);
 void   vtxSetPower(uint8_t level);
 bool   vtxSetFrequency(uint16_t targetMHz);
+void   vtxVerify();
 void   setGroundMode(GroundMode newMode);
 #if STAGE == 2
 void   fireSolenoid();
@@ -406,7 +407,8 @@ float prevAltVelocity= 0.0f;
 float prevAccelMag   = 0.0f;
 bool  apogeeDetected = false;
 
-uint8_t faultFlags = FAULT_NONE;
+uint8_t faultFlags   = FAULT_NONE;
+bool    midAirBoot   = false;
 
 // Command / mode state
 bool     videoEnabled    = true;
@@ -477,6 +479,7 @@ bool initSD() {
   logFile = SD.open(fname, FILE_WRITE);
   if (!logFile) { faultFlags|=FAULT_SD; return false; }
   logFile.println("ts_ms,alt_ft,vel_fps,accel_thrust,accel_lat,gyro_roll,gyro_pitch,gyro_yaw,temp_c,state,stage,faults,ground_mode,lora_freq_mhz,telem_tx_count");
+  if (midAirBoot) logFile.println("MID_AIR_BOOT_DETECTED");
   logFile.flush(); logOpen=true;
   Serial.print("[SD] → "); Serial.println(fname); return true;
 }
@@ -555,7 +558,7 @@ void sendStatusPacket(uint8_t cmd, uint8_t result) {
   sp.fault_flags     = faultFlags;
   sp.test_mode       = (groundMode == GM_TEST_IDLE) ? 1 : 0;  // Legacy compat
   sp.video_enabled   = videoEnabled ? 1 : 0;
-  sp.telem_rate_hz   = (telemRateMs == TELEM_RATE_HIGH_MS) ? 10 : 1;
+  sp.telem_rate_hz   = (telemRateMs == TELEM_RATE_HIGH_MS) ? 5 : 1;
   sp.lora_freq_mhz   = currentLoRaFreq;
   sp.vtx_freq_mhz    = currentVTXFreq;
   sp.vtx_power_index = currentVTXPwrIdx;
@@ -804,7 +807,7 @@ void vtxSendCmd(uint8_t cmd, const uint8_t* data, uint8_t dataLen) {
   // Command byte comes BEFORE length byte per SA spec
   // Previous firmware had these reversed — another reason all commands failed
   frame[i++] = cmd;
-  frame[i++] = (uint8_t)(dataLen + 1);  // LEN = payload bytes + 1 (CRC byte)
+  frame[i++] = (uint8_t)dataLen;          // LEN = number of data payload bytes (CRC is separate, not counted)
 
   for (uint8_t d = 0; d < dataLen && i < 11; d++) {
     frame[i++] = data[d];
@@ -817,6 +820,25 @@ void vtxSendCmd(uint8_t cmd, const uint8_t* data, uint8_t dataLen) {
 
   VTX_SERIAL.write(frame, i);
   VTX_SERIAL.flush();
+}
+
+void vtxVerify() {
+  vtxSendCmd(0x01, nullptr, 0);
+  delay(200);
+  int count = 0;
+  Serial.print(F("[VTX] SA response bytes:"));
+  while (VTX_SERIAL.available()) {
+    uint8_t b = (uint8_t)VTX_SERIAL.read();
+    Serial.print(F(" 0x"));
+    if (b < 0x10) Serial.print(F("0"));
+    Serial.print(b, HEX);
+    count++;
+  }
+  if (count == 0) {
+    Serial.println(F("[VTX] No SA response — check wiring"));
+  } else {
+    Serial.println();
+  }
 }
 
 void vtxSetPower(uint8_t level) {
@@ -847,13 +869,14 @@ bool vtxSetFrequency(uint16_t targetMHz) {
 bool initVTX() {
   VTX_SERIAL.begin(4800);
   delay(400);
+  vtxVerify();
   vtxSetPower(VTX_PWR_OFF);
   Serial.println("[VTX] Serial6 init — 25mW boot power, SA frames corrected");
 
   // Send SA GET_SETTINGS to probe VTX response.
   // AKK A1918 will reply with its current settings if the UART path is intact.
   // We do not parse the response here — just log whether bytes come back within 200ms.
-  vtxSendCmd(0x03, nullptr, 0);  // GET_SETTINGS — modified command per SA V2 spec
+  vtxSendCmd(0x01, nullptr, 0);  // GET_SETTINGS — SA V1/V2 command 0x01
   delay(200);
   bool vtxResponded = (VTX_SERIAL.available() > 0);
   while (VTX_SERIAL.available()) VTX_SERIAL.read();  // Flush response bytes
@@ -1533,6 +1556,49 @@ void setup() {
 
   initSensors();
   calibratePad();
+
+  // ── Mid-air boot detection ────────────────────────────────────────────────
+  // If the Teensy reboots during flight (brownout, connector), calibratePad()
+  // will have used mid-flight pressure as the baseline.  A large positive
+  // altitude reading relative to that baseline means we are airborne.
+  {
+    bool midAirBootDetected = false;
+    if (!(faultFlags & FAULT_BMP)) {
+      float altSum  = 0.0f;
+      int   altGood = 0;
+      for (int i = 0; i < 3; i++) {
+        if (bmp.performReading()) {
+          altSum += bmp.readAltitude(basePressureHPa) * 3.28084f;
+          altGood++;
+        }
+        delay(50);
+      }
+      if (altGood > 0) {
+        float midAirAlt = altSum / (float)altGood;
+        float midAirAccelMag = 0.0f;
+        if (!(faultFlags & FAULT_ADXL)) {
+          sensors_event_t ev; adxl.getEvent(&ev);
+          midAirAccelMag = sqrtf(ev.acceleration.x * ev.acceleration.x +
+                                  ev.acceleration.z * ev.acceleration.z);
+        }
+        (void)midAirAccelMag;
+        if (midAirAlt > 300.0f) {
+          midAirBootDetected = true;
+          Serial.print(F("[SAFETY] MID-AIR BOOT DETECTED — alt="));
+          Serial.print(midAirAlt, 1);
+          Serial.println(F("ft — forcing LAUNCH_READY + DESCENT"));
+        }
+      }
+    }
+    if (midAirBootDetected) {
+      midAirBoot        = true;
+      setGroundMode(GM_LAUNCH_READY);   // VTX not yet init — groundMode set, TX harmlessly discarded
+      flightState       = ST_DESCENT;
+      osdMissionStarted = true;
+      tOSDLiftoff       = millis();
+    }
+  }
+
   initLoRa();
   initVTX();
   initRunCam();
@@ -1540,7 +1606,13 @@ void setup() {
   initOSD();
 
   // Enter TEST_IDLE — sets VTX to 25 mW, ensures camera not recording
-  setGroundMode(GM_TEST_IDLE);
+  // Skip if mid-air boot detected: groundMode is already LAUNCH_READY and
+  // FSM is in DESCENT.  Re-apply flight power since initVTX() cleared it.
+  if (!midAirBoot) {
+    setGroundMode(GM_TEST_IDLE);
+  } else {
+    vtxSetPower(vtxFlightPower);   // Re-apply flight power after initVTX() cleared it
+  }
 
   Serial.print(F("[INIT] Fault register: 0x")); Serial.println(faultFlags, HEX);
   Serial.println(faultFlags ? F("[INIT] WARNING: degraded systems") : F("[INIT] All systems nominal"));

@@ -123,7 +123,7 @@ FLIGHT_PACKET_FIELDS = [
 #
 #  Fields in order:
 #    stage, flight_state, fault_flags, test_mode, video_enabled,
-#    telem_rate_hz, lora_freq_mhz, vtx_freq_mhz,
+#    telem_rate_hz (5 = high rate / LAUNCH_READY, 1 = low rate / PAD_IDLE), lora_freq_mhz, vtx_freq_mhz,
 #    vtx_power_index, vtx_flight_power, ground_mode, cam_recording,
 #    last_cmd, last_cmd_result, crc8
 # -----------------------------------------------------------------------------

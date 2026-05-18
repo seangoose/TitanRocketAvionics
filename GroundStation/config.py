@@ -71,6 +71,14 @@ MAP_SITES = {
         "margin":   0.15,   # ~16 km radius tile cache
         "max_zoom": 17,
     },
+    "FAR_SE_PATCH": {
+        "name":     "FAR — SE patch (explicit bbox)",
+        "lat":      35.350,
+        "lon":      -117.803,
+        "zoom":     15,
+        "margin":   0.06,
+        "max_zoom": 17,
+    },
     "CSUF": {
         "name":     "CSUF — Fullerton",
         "lat":      33.8825,
