@@ -28,8 +28,8 @@ import os
 # which would cause QWebEngineView to crash or render blank.
 os.environ["QT_QPA_PLATFORM"] = "xcb"
 
-# Disable GPU sandbox required for QWebEngine on Pi 5.
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox"
+# MapWidget now uses native QPainter tile rendering — no QWebEngineView,
+# no Chromium subprocess, no Pi 5 page_allocator mmap crash.
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore    import Qt

@@ -1,37 +1,27 @@
 # =============================================================================
 #  TRES Titan Ground Station — gps_worker.py
 #  QThread that reads the Featherweight GPS Ground Station V2 USB serial
-#  output and parses ASCII "@"-prefixed position packets.
+#  output and parses ASCII "@"-prefixed space-delimited packets.
 #
-#  IMPORTANT — VERIFY AGAINST APPENDIX A OF YOUR FEATHERWEIGHT MANUAL
-#  ────────────────────────────────────────────────────────────────────
-#  The exact field order and count for each packet type are documented
-#  in "Appendix A: Serial commands and data for version 2 ground stations"
-#  in your GPS Tracker User's Manual (featherweightaltimeters.com).
+#  CONFIRMED serial format (captured 2026-04-30 at 115200 baud):
+#    Baud rate:  115200
+#    Format:     space-delimited,  "@ TYPE  LEN  FLAGS  TIME  ..."
 #
-#  This parser implements the tracker position packet (type "T") based
-#  on available documentation and community reports. If any field below
-#  produces garbage data, open a terminal at 57600 baud and compare the
-#  raw "@T" lines against the Appendix A column listing.
+#  Packet types confirmed by live capture with CSUFTRKERS2:
+#    GPS_STAT  — tracker position (Alt, lt, ln, Vel keywords)
+#    RX_NOMTK  — RF link stats (RSSI, SNR, trk_B_V)
+#    GS_STAT   — ground station summary (p_RSSI, PkRx)
+#    BATT_BLE  — ground station battery/BLE status
+#    TX_STAT   — uplink transmission info (ignored)
 #
-#  Known serial format summary:
-#    - Binary "FWT"-prefixed packets: internal Bluetooth bridge data.
-#      Silently discarded — do not attempt to parse.
-#    - ASCII "@"-prefixed packets: human-readable, CR/LF terminated.
-#      Format: @[TYPE],[LEN],[DATE],[TIME],[FIELD1],[FIELD2],...
-#    - 14 packet types exist; this parser handles types T (tracker
-#      position), G (ground station status), and L (lost rocket).
+#  GPS_STAT example:
+#    @ GPS_STAT 203 0000 00 00 TIME CRC_OK TRK NAME Alt NNNNNN lt +LAT ln +LON
+#               Vel +VVEL +HVEL +SPARE Fix N # SATS ...
 # =============================================================================
 
 import math
 import serial
 from PyQt5.QtCore import QThread, pyqtSignal
-
-
-# Packet type constants (single character after the "@")
-FW_TYPE_TRACKER  = "T"    # Tracker position data
-FW_TYPE_GS       = "G"    # Ground station status
-FW_TYPE_LOST     = "L"    # Lost-rocket relay data
 
 
 class FWGPSWorker(QThread):
@@ -40,19 +30,10 @@ class FWGPSWorker(QThread):
 
     Signals:
       position_update(tracker_name, lat, lon, alt_ft, vert_vel, horiz_vel)
-        Emitted once per second when a valid tracker position packet arrives.
-
       lost_rocket(tracker_name, lat, lon, alt_ft)
-        Emitted when a lost-rocket relay packet is received.
-
       gs_status(rssi, battery_v, packet_rate)
-        Emitted on ground station status updates.
-
       connection_changed(bool)
-        True when port opens, False when it closes or errors.
-
       raw_log(str)
-        Raw line text for the debug console.
     """
 
     position_update    = pyqtSignal(str, float, float, float, float, float)
@@ -63,9 +44,10 @@ class FWGPSWorker(QThread):
 
     def __init__(self, port: str, baud: int, parent=None):
         super().__init__(parent)
-        self.port     = port
-        self.baud     = baud
-        self._running = False
+        self.port      = port
+        self.baud      = baud
+        self._running  = False
+        self._last_batt_v = 0.0
         self._last_valid_lat: float | None = None
         self._last_valid_lon: float | None = None
 
@@ -76,8 +58,7 @@ class FWGPSWorker(QThread):
         self._running = True
         while self._running:
             try:
-                with serial.Serial(self.port, self.baud,
-                                   timeout=1.0) as ser:
+                with serial.Serial(self.port, self.baud, timeout=1.0) as ser:
                     self.connection_changed.emit(True)
                     self.raw_log.emit(
                         f"[FW GPS] Connected on {self.port} @ {self.baud}")
@@ -96,23 +77,14 @@ class FWGPSWorker(QThread):
                 raw = ser.readline()
             except serial.SerialException:
                 break
-
             if not raw:
                 continue
-
-            # Discard binary FWT packets silently
-            if raw[:3] == b"FWT":
-                continue
-
-            # Only process ASCII "@"-prefixed packets
             try:
                 line = raw.decode("ascii", errors="replace").strip()
             except Exception:
                 continue
-
             if not line.startswith("@"):
                 continue
-
             self.raw_log.emit(f"[FW GPS] {line}")
             self._parse_line(line)
 
@@ -136,89 +108,63 @@ class FWGPSWorker(QThread):
 
     def _parse_line(self, line: str):
         """
-        Parse one "@TYPE,LEN,DATE,TIME,...fields..." packet line.
+        Parse one space-delimited "@ TYPE ..." packet.
 
-        ── APPENDIX A FIELD MAPPING ────────────────────────────────
-        This mapping is based on Featherweight documentation and
-        community-reported field order. Verify the column numbers
-        below against Appendix A of your manual before flight.
-
-        Tracker position packet "@T":
-          [0]  @T         packet type
-          [1]  LEN        payload length
-          [2]  DATE       YYYY-MM-DD
-          [3]  TIME       HH:MM:SS.sss
-          [4]  NAME       tracker name string
-          [5]  CHAN       channel number
-          [6]  LAT        decimal degrees (positive = N)
-          [7]  LON        decimal degrees (positive = E)
-          [8]  ALT_FT     altitude in feet (MSL)
-          [9]  VERT_VEL   vertical velocity ft/s
-          [10] HORIZ_VEL  horizontal velocity ft/s
-          [11] BEARING    bearing from ground station, degrees
-          [12] SATS       satellite count
-          [13] RSSI       LoRa RSSI dBm
-          [14] BATT_V     tracker battery voltage
-          [15] GS_RSSI    ground station RSSI
-          ... additional fields may follow per firmware version
-
-        ── HOW TO VERIFY ───────────────────────────────────────────
-        Run this in a terminal before the first use:
-          python3 -c "
-          import serial
-          s = serial.Serial('/dev/ttyACM0', 57600, timeout=2)
-          for _ in range(30):
-              l = s.readline().decode('ascii', errors='replace').strip()
-              if l.startswith('@T'):
-                  print(l)
-          s.close()
-          "
-        Then compare each comma-separated column to the Appendix A table.
-        Update the field indices below to match your firmware version.
+        Actual format confirmed by serial capture (2026-04-30):
+          tokens[0] = '@'
+          tokens[1] = packet type string (GS_STAT, BATT_BLE, TRACKER?, ...)
+          tokens[2] = payload length
+          remaining = type-specific fields
         """
-
-        parts = line.split(",")
-        ptype = parts[0][1:]   # Strip the "@" prefix
-
-        try:
-            if ptype == FW_TYPE_TRACKER:
-                self._parse_tracker(parts)
-            elif ptype == FW_TYPE_GS:
-                self._parse_gs_status(parts)
-            elif ptype == FW_TYPE_LOST:
-                self._parse_lost_rocket(parts)
-            # All other packet types are silently ignored
-
-        except (IndexError, ValueError) as e:
-            self.raw_log.emit(
-                f"[FW GPS] Parse error on '{line[:60]}': {e}")
-
-    def _parse_tracker(self, parts: list):
-        """
-        Parse tracker position packet.
-        VERIFY FIELD INDICES AGAINST APPENDIX A OF YOUR MANUAL.
-        """
-        # ── FIELD INDEX CONSTANTS ──────────────────────────────────
-        # Change these numbers if your firmware version differs.
-        IDX_NAME      = 4
-        IDX_LAT       = 6
-        IDX_LON       = 7
-        IDX_ALT_FT    = 8
-        IDX_VERT_VEL  = 9
-        IDX_HORIZ_VEL = 10
-        # ──────────────────────────────────────────────────────────
-
-        name = parts[IDX_NAME].strip()
-
-        try:
-            lat       = float(parts[IDX_LAT])
-            lon       = float(parts[IDX_LON])
-            alt_ft    = float(parts[IDX_ALT_FT])
-            vert_vel  = float(parts[IDX_VERT_VEL])
-            horiz_vel = float(parts[IDX_HORIZ_VEL])
-        except (ValueError, IndexError):
-            self.raw_log.emit(f"[FW GPS] {name}: NO FIX — waiting for satellites")
+        tokens = line.split()
+        if len(tokens) < 3:
             return
+        ptype = tokens[1]
+
+        try:
+            if ptype == "GPS_STAT":
+                self._parse_gps_stat(tokens)
+            elif ptype == "RX_NOMTK":
+                self._parse_rx_nomtk(tokens)
+            elif ptype == "GS_STAT":
+                self._parse_gs_status(tokens)
+            elif ptype == "BATT_BLE":
+                self._parse_batt_ble(tokens)
+            elif ptype in ("LOST", "FND"):
+                self._parse_lost_rocket(tokens)
+            # TX_STAT and other informational types silently ignored
+        except (IndexError, ValueError) as e:
+            self.raw_log.emit(f"[FW GPS] Parse error '{ptype}': {e}")
+
+    # ------------------------------------------------------------------
+
+    def _parse_gps_stat(self, tokens: list):
+        """
+        @ GPS_STAT 203 0000 00 00 TIME CRC_OK TRK NAME Alt NNNNNN
+                   lt +LAT ln +LON Vel +VVEL +HVEL +SPARE Fix N # SATS ...
+
+        Confirmed field indices (live capture 2026-04-30):
+          [9]  tracker name
+          [11] altitude ft  (after keyword 'Alt' at [10])
+          [13] latitude     (after keyword 'lt'  at [12])
+          [15] longitude    (after keyword 'ln'  at [14])
+          [17] vert vel     (after keyword 'Vel' at [16])
+          [18] horiz vel
+        """
+        try:
+            name   = tokens[tokens.index("TRK") + 1]
+            lat    = float(tokens[tokens.index("lt")  + 1])
+            lon    = float(tokens[tokens.index("ln")  + 1])
+            alt_ft = float(tokens[tokens.index("Alt") + 1])
+            vi     = tokens.index("Vel") + 1
+            vert_vel  = float(tokens[vi])
+            horiz_vel = float(tokens[vi + 1])
+        except (ValueError, IndexError) as e:
+            self.raw_log.emit(f"[FW GPS] GPS_STAT parse error: {e}")
+            return
+
+        self.raw_log.emit(
+            f"[FW GPS] POS {name}  {lat:.5f},{lon:.5f}  {alt_ft:.0f}ft")
 
         if self._last_valid_lat is not None:
             distance_m = self._haversine_distance_m(
@@ -235,38 +181,75 @@ class FWGPSWorker(QThread):
         self._last_valid_lon = lon
         self.position_update.emit(name, lat, lon, alt_ft, vert_vel, horiz_vel)
 
-    def _parse_gs_status(self, parts: list):
+    def _parse_rx_nomtk(self, tokens: list):
         """
-        Parse ground station status packet.
-        Field order: verify against Appendix A.
+        @ RX_NOMTK ... CRC_OK Rx NomTrk NAME PkRx N PkTx N RSSI N SNR N
+                    ... trk_B_V MV ...
+
+        Emits gs_status with RF link RSSI, tracker battery, and packet count.
         """
-        IDX_RSSI    = 4
-        IDX_BATT    = 5
-        IDX_PKT_RT  = 6
+        try:
+            rssi_idx = tokens.index("RSSI") + 1
+            rssi = float(tokens[rssi_idx])
+        except (ValueError, IndexError):
+            rssi = 0.0
 
-        rssi      = float(parts[IDX_RSSI])
-        batt_v    = float(parts[IDX_BATT])
-        pkt_rate  = float(parts[IDX_PKT_RT])
+        try:
+            pkt_idx = tokens.index("PkRx") + 1
+            pkt_rate = float(tokens[pkt_idx])
+        except (ValueError, IndexError):
+            pkt_rate = 0.0
 
-        self.gs_status.emit(rssi, batt_v, pkt_rate)
+        try:
+            batt_idx = tokens.index("trk_B_V") + 1
+            self._last_batt_v = float(tokens[batt_idx]) / 1000.0
+        except (ValueError, IndexError):
+            pass
 
-    def _parse_lost_rocket(self, parts: list):
+        self.gs_status.emit(rssi, self._last_batt_v, pkt_rate)
+
+    def _parse_gs_status(self, tokens: list):
         """
-        Parse lost-rocket relay packet.
+        @ GS_STAT ... p_RSSI N ... PkRx N ...
+        Secondary status — emits gs_status if RX_NOMTK not present.
         """
-        IDX_NAME   = 4
-        IDX_LAT    = 5
-        IDX_LON    = 6
-        IDX_ALT_FT = 7
+        try:
+            rssi_idx = tokens.index("p_RSSI") + 1
+            rssi = float(tokens[rssi_idx])
+        except (ValueError, IndexError):
+            rssi = 0.0
 
-        name   = parts[IDX_NAME].strip()
-        lat    = float(parts[IDX_LAT])
-        lon    = float(parts[IDX_LON])
-        alt_ft = float(parts[IDX_ALT_FT])
+        try:
+            pkt_idx = tokens.index("PkRx") + 1
+            pkt_rate = float(tokens[pkt_idx])
+        except (ValueError, IndexError):
+            pkt_rate = 0.0
+
+        self.gs_status.emit(rssi, self._last_batt_v, pkt_rate)
+
+    def _parse_batt_ble(self, tokens: list):
+        """
+        @ BATT_BLE LEN FLAGS S1 S2 TIME BATT_MV BLE+/- TEMP degC CRC: XXXX
+        tokens[7] = battery millivolts (e.g. 4126 → 4.126 V)
+        """
+        try:
+            self._last_batt_v = float(tokens[7]) / 1000.0
+        except (ValueError, IndexError):
+            pass
+
+    def _parse_lost_rocket(self, tokens: list):
+        """LOST / FND packet — keyword-based, mirrors GPS_STAT layout."""
+        try:
+            name   = tokens[tokens.index("TRK") + 1]
+            lat    = float(tokens[tokens.index("lt")  + 1])
+            lon    = float(tokens[tokens.index("ln")  + 1])
+            alt_ft = float(tokens[tokens.index("Alt") + 1])
+        except (ValueError, IndexError) as e:
+            self.raw_log.emit(f"[FW GPS] LOST parse error: {e}")
+            return
 
         self._last_valid_lat = None
         self._last_valid_lon = None
         self.lost_rocket.emit(name, lat, lon, alt_ft)
         self.raw_log.emit(
-            f"[FW GPS] LOST ROCKET RELAY: {name} @ {lat:.5f},{lon:.5f} "
-            f"{alt_ft:.0f}ft")
+            f"[FW GPS] LOST/FND: {name} @ {lat:.5f},{lon:.5f} {alt_ft:.0f}ft")

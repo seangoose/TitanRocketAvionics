@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime
 
 from PyQt5.QtCore    import Qt, QTimer, pyqtSlot, pyqtSignal
-from PyQt5.QtGui     import QPixmap
+from PyQt5.QtGui     import QPixmap, QTransform
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QGroupBox, QTextEdit,
@@ -303,8 +303,9 @@ class VideoPanel(QGroupBox):
 
     def update_frame(self, stage: int, img):
         if stage != self.stage: return
-        pix = QPixmap.fromImage(img).scaled(
-            self._label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pix = QPixmap.fromImage(img)
+        pix = pix.transformed(QTransform().rotate(90), Qt.SmoothTransformation)
+        pix = pix.scaled(self._label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._label.setPixmap(pix)
 
     def set_status(self, msg: str):
@@ -650,6 +651,13 @@ class CommandPanel(QWidget):
         tstl.addWidget(self._sol_stage_lbl, 1, 0, 1, 2)
         tstl.addWidget(self._mkbtn("Force Pkt",  lambda: self._send(P.CMD_FORCE_PACKET)), 2, 0)
         tstl.addWidget(self._mkbtn("Get Status", lambda: self._send(P.CMD_GET_STATUS)),   2, 1)
+        self._direct_sol_btn = self._mkbtn(
+            "⚡ Direct MOSFET Fire  [S2 — no mode gate]",
+            self._direct_fire_sol, "danger")
+        self._direct_sol_btn.setToolTip(
+            "Sends CMD_FIRE_SOLENOID directly to S2 regardless of ground mode.\n"
+            "Use when the gated button above is blocked but the MOSFET must fire.")
+        tstl.addWidget(self._direct_sol_btn, 3, 0, 1, 2)
         layout.addWidget(tst)
 
         # ── 7. FULL SYSTEM TEST — BATTERY EVALUATION ────────────
@@ -868,6 +876,22 @@ class CommandPanel(QWidget):
         self._r2.send_frame(P.build_standard_frame(2, P.CMD_FIRE_SOLENOID))
         self._log_msg("SENT ⚠", P.CMD_FIRE_SOLENOID, 2, "Water payload test")
         if self._data.is_recording: self._data.record_event("CMD FIRE_SOLENOID → S2")
+
+    def _direct_fire_sol(self):
+        reply = QMessageBox.warning(
+            self, "Direct MOSFET Fire",
+            "Send CMD_FIRE_SOLENOID directly to S2 radio.\n\n"
+            "This bypasses the TEST_IDLE gate — the Teensy will fire the MOSFET "
+            "regardless of current ground mode.\n\n"
+            "Proceed?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._r2.send_frame(P.build_standard_frame(2, P.CMD_FIRE_SOLENOID))
+        self._log_msg("SENT ⚠", P.CMD_FIRE_SOLENOID, 2, "Direct MOSFET fire (no mode gate)")
+        if self._data.is_recording: self._data.record_event("CMD DIRECT_FIRE_SOLENOID → S2")
 
     def _send_full_sys_test(self, stages: list):
         not_ready = []
@@ -1117,6 +1141,7 @@ class TestStatsPanel(QWidget):
 class GPSPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setMinimumHeight(130)
         g = QGridLayout(self)
         self.conn_lbl = QLabel("⚫ Disconnected"); self.conn_lbl.setObjectName("status_err")
         g.addWidget(QLabel("Status:"),    0, 0); g.addWidget(self.conn_lbl, 0, 1, 1, 3)
@@ -1218,12 +1243,12 @@ class MainWindow(QMainWindow):
 
         # ── Map ──────────────────────────────────────────────────────
         self._map = MapWidget()
-        self._map.setMinimumHeight(320)
+        self._map.setMinimumHeight(180)
 
         # ── GPS panel (bottom right) ──────────────────────────────────
         self._gps_panel = GPSPanel()
         gps_container = QWidget()
-        gps_container.setMinimumHeight(320)
+        gps_container.setMinimumHeight(340)
         gps_vbox = QVBoxLayout(gps_container)
         gps_vbox.setContentsMargins(2, 2, 2, 2)
         gps_vbox.setSpacing(3)
@@ -1388,12 +1413,13 @@ class MainWindow(QMainWindow):
         g5.setObjectName("controls_group")
         g5l = QGridLayout(g5)
         g5l.setSpacing(2)
-        g5l.addWidget(self._cmd_panel._sol_btn,       0, 0, 1, 2)
-        g5l.addWidget(self._cmd_panel._sol_stage_lbl, 1, 0, 1, 2)
-        g5l.addWidget(self._cmd_panel._fst_s1_btn,    2, 0)
-        g5l.addWidget(self._cmd_panel._fst_s2_btn,    2, 1)
-        g5l.addWidget(self._cmd_panel._fst_both_btn,  3, 0, 1, 2)
-        g5l.addWidget(self._cmd_panel._fst_countdown, 4, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._sol_btn,         0, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._sol_stage_lbl,  1, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._direct_sol_btn, 2, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._fst_s1_btn,     3, 0)
+        g5l.addWidget(self._cmd_panel._fst_s2_btn,     3, 1)
+        g5l.addWidget(self._cmd_panel._fst_both_btn,   4, 0, 1, 2)
+        g5l.addWidget(self._cmd_panel._fst_countdown,  5, 0, 1, 2)
         bar_layout.addWidget(g5)
 
         # ── Group 6 — Recording + Showcase (200px) ───────────────────
@@ -1745,13 +1771,13 @@ class MainWindow(QMainWindow):
         old_worker.wait(2000)
 
         try: old_worker.frame_ready.disconnect(panel.update_frame)
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
         try: old_worker.status_message.disconnect()
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
         try: old_worker.recording_changed.disconnect()
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
         try: old_worker.connection_changed.disconnect()
-        except RuntimeError: pass
+        except (TypeError, RuntimeError): pass
 
         self._showcase_worker = VideoFileWorker(
             config.SHOWCASE_STAGE,
@@ -1790,17 +1816,17 @@ class MainWindow(QMainWindow):
             panel = self._video_s1 if config.SHOWCASE_STAGE == 1 else self._video_s2
 
             try: self._showcase_worker.frame_ready.disconnect(panel.update_frame)
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
             try:
                 if self._sc_status_slot:
                     self._showcase_worker.status_message.disconnect(self._sc_status_slot)
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
             try:
                 if self._sc_conn_slot:
                     self._showcase_worker.connection_changed.disconnect(self._sc_conn_slot)
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
             try: self._showcase_worker.recording_changed.disconnect()
-            except RuntimeError: pass
+            except (TypeError, RuntimeError): pass
 
             if config.SHOWCASE_STAGE == 1:
                 live_worker = self._vid_s1

@@ -22,7 +22,7 @@ M0_S2_BAUD     = 115200
 # Baud rate: 57600 per Featherweight documentation (Appendix A).
 # Verify against your unit's serial output if packets appear garbled.
 FW_GPS_PORT    = "/dev/tres_fw_gps"
-FW_GPS_BAUD    = 57600
+FW_GPS_BAUD    = 115200
 
 # -----------------------------------------------------------------------------
 #  VIDEO CAPTURE
@@ -30,8 +30,8 @@ FW_GPS_BAUD    = 57600
 #  Run `v4l2-ctl --list-devices` to identify which index is which camera.
 # -----------------------------------------------------------------------------
 
-VIDEO_S1_INDEX = 0    # Stage 1 camera capture card device index
-VIDEO_S2_INDEX = 2    # Stage 2 camera capture card device index  (/dev/video2)
+VIDEO_S1_INDEX = 2    # Stage 1 camera capture card device index  (/dev/video2)
+VIDEO_S2_INDEX = 0    # Stage 2 camera capture card device index
 
 # Frame size requested from capture card
 # Most USB capture cards support 640x480 at 30 fps reliably on Pi 5.
@@ -143,7 +143,7 @@ STAGE_NAMES = {1: "Stage 1 (Booster)", 2: "Stage 2 (Sustainer)"}
 # -----------------------------------------------------------------------------
 
 SHOWCASE_MODE_DEFAULT   = False         # Start in showcase mode on launch
-SHOWCASE_STAGE          = 1            # Which stage panel plays the file (1 or 2)
+SHOWCASE_STAGE          = 2            # Which stage panel plays the file (1 or 2)
 SHOWCASE_VIDEO_PATH     = "/home/titanrocket/TitanRocketAvionics/GroundStation/showcase"
                                         # Path to a video file OR a folder — if a folder,
                                         # the first .mp4/.avi/.mkv/.mov file found is played.
