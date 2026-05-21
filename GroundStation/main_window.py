@@ -564,7 +564,7 @@ class CommandPanel(QWidget):
         self._vtx_set_s2_btn = self._mkbtn("Set S2", lambda: self._send_vtx(2), "confirm")
         vgl.addWidget(self._vtx_set_s2_btn, 2, 2)
 
-        pwr_labels = ["25mW", "200mW", "500mW", "1W"]
+        pwr_labels = ["200mW", "400mW", "800mW", "1W"]
         vgl.addWidget(QLabel("S1 Flt Pwr:"), 3, 0)
         self._vp_s1_btns = []
         vpg1 = QHBoxLayout()
@@ -666,7 +666,7 @@ class CommandPanel(QWidget):
 
         warn = QLabel(
             "⚡ Fires VTX + RunCam + 10Hz telem simultaneously for 90s.\n"
-            "Stage 2: FIRES SOLENOID (one-shot — destructive test).\n"
+            "Stage 2: FIRES SOLENOID — latches OPEN, stays open until power cycle (one-shot).\n"
             "Ground station auto-starts all recording."
         )
         warn.setObjectName("telem_label")
@@ -913,8 +913,8 @@ class CommandPanel(QWidget):
             reply = QMessageBox.question(
                 self, "Stage 2 Full System Test",
                 "Stage 2 full system test will FIRE THE WATER PAYLOAD SOLENOID.\n\n"
-                "This is a one-shot event — the solenoid cannot fire again until "
-                "the board is power-cycled.\n\n"
+                "This is a one-shot event — the valve latches OPEN and stays open until "
+                "the board is power-cycled. It cannot fire again until then.\n\n"
                 "Proceed?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No

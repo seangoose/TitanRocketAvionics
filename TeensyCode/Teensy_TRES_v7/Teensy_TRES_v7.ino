@@ -133,15 +133,27 @@
 // ================================================================
 //  SOLENOID  (Stage 2 only)
 // ================================================================
-#define SOLENOID_HOLD_MS   12000UL
+#define SOLENOID_HOLD_MS   12000UL  // Legacy hold time — no longer used; valve latches open for the rest of flight.
 
 // ================================================================
 //  VTX SMARTAUDIO POWER LEVELS  (SA index)
-//  0=25mW  1=200mW  2=500mW  3=1000mW
 // ================================================================
 #define VTX_PWR_PAD     1
 #define VTX_PWR_FLIGHT  3
 #define VTX_PWR_OFF     0
+
+// ── AKK Race Ranger SmartAudio power table ───────────────────────────────────────
+// The Race Ranger is SmartAudio V2.1: power is set as a dBm value with bit 0x80 set,
+// NOT a raw 0..3 index. We keep a 0..3 index everywhere else and map it here.
+// Default = US Race Ranger (200/400/800/1000 mW = 23/26/29/30 dBm).
+//   index 0 -> 200mW  (23dBm) 0x97
+//   index 1 -> 400mW  (26dBm) 0x9A
+//   index 2 -> 800mW  (29dBm) 0x9D
+//   index 3 -> 1000mW (30dBm) 0x9E
+// BENCH-VERIFY FALLBACKS:
+//   International Race Ranger (25/400/800/1600mW): {0x8E,0x9A,0x9D,0xA0}
+//   SmartAudio V2.0 raw-index devices:             {0x00,0x01,0x02,0x03}
+static const uint8_t VTX_PWR_WIRE[4] = {0x97, 0x9A, 0x9D, 0x9E};
 
 // ================================================================
 //  ALTITUDE FILTER
@@ -767,7 +779,7 @@ void printSerialStatus(uint8_t cmd, uint8_t result) {
   else if (groundMode==GM_PAD_IDLE) Serial.println(F("1 Hz (pad idle)"));
   else Serial.println(telemRateMs==TELEM_RATE_HIGH_MS ? F("10 Hz") : F("1 Hz"));
   Serial.print(F("│ VTX freq:     ")); Serial.print(currentVTXFreq); Serial.println(F(" MHz"));
-  const char* pwrLbls[]={"25mW","200mW","500mW","1000mW"};
+  const char* pwrLbls[]={"200mW","400mW","800mW","1000mW"};
   Serial.print(F("│ VTX current:  ")); Serial.println(currentVTXPwrIdx<=3?pwrLbls[currentVTXPwrIdx]:"?");
   Serial.print(F("│ VTX flight:   ")); Serial.println(vtxFlightPower<=3?pwrLbls[vtxFlightPower]:"?");
   Serial.print(F("│ Video:        ")); Serial.println(videoEnabled?F("ON"):F("OFF"));
@@ -806,7 +818,8 @@ void vtxSendCmd(uint8_t cmd, const uint8_t* data, uint8_t dataLen) {
 
   // Command byte comes BEFORE length byte per SA spec
   // Previous firmware had these reversed — another reason all commands failed
-  frame[i++] = cmd;
+  // SmartAudio command byte is ENCODED: (command << 1) | 0x01 (per TBS SA spec / Betaflight SACMD())
+  frame[i++] = (uint8_t)((cmd << 1) | 0x01);
   frame[i++] = (uint8_t)dataLen;          // LEN = number of data payload bytes (CRC is separate, not counted)
 
   for (uint8_t d = 0; d < dataLen && i < 11; d++) {
@@ -835,15 +848,18 @@ void vtxVerify() {
     count++;
   }
   if (count == 0) {
-    Serial.println(F("[VTX] No SA response — check wiring"));
+    Serial.println(F("[VTX] SA is TX-only (RX not wired) — response not readable; "
+                     "verify VTX by LED/power/channel at the bench"));
   } else {
     Serial.println();
   }
 }
 
 void vtxSetPower(uint8_t level) {
-  vtxSendCmd(0x02, &level, 1);
-  currentVTXPwrIdx = level;
+  if (level > 3) level = 3;
+  uint8_t wire = VTX_PWR_WIRE[level];   // map 0..3 index -> SA V2.1 dBm wire value
+  vtxSendCmd(0x02, &wire, 1);           // 0x02 -> encoded to wire cmd 0x05 (SET_POWER)
+  currentVTXPwrIdx = level;             // STATUS still reports the 0..3 index
 }
 
 static const uint16_t VTX_CHAN[5][8] = {
@@ -878,13 +894,8 @@ bool initVTX() {
   // We do not parse the response here — just log whether bytes come back within 200ms.
   vtxSendCmd(0x01, nullptr, 0);  // GET_SETTINGS — SA V1/V2 command 0x01
   delay(200);
-  bool vtxResponded = (VTX_SERIAL.available() > 0);
-  while (VTX_SERIAL.available()) VTX_SERIAL.read();  // Flush response bytes
-  if (!vtxResponded) {
-    Serial.println("[VTX] WARNING — no SA response. Check pin 24 wiring and VTX power.");
-  } else {
-    Serial.println("[VTX] SA response received — VTX is live");
-  }
+  while (VTX_SERIAL.available()) VTX_SERIAL.read();  // Flush any unexpected bytes
+  Serial.println(F("[VTX] Init sent (SA TX-only, blind). Confirm via VTX LEDs / RX."));
   return true;
 }
 
@@ -893,7 +904,7 @@ bool initVTX() {
 //  Serial1 TX (pin 1) → RunCam RX
 //  Serial1 RX (pin 0) ← RunCam TX  (not parsed, used for future feedback)
 //
-//  Frame: [0xCC][CMD_ID][DATA...][CRC8/poly-0x31]
+//  Frame: [0xCC][CMD_ID][DATA...][CRC8/DVB-S2]
 //  No length byte. Frame size is fixed per command.
 //  CRC covers all bytes from 0xCC through last DATA byte.
 //
@@ -917,9 +928,8 @@ bool initVTX() {
 #define RCDP_ACT_START    0x03   // Explicit start recording (v2)
 #define RCDP_ACT_STOP     0x04   // Explicit stop recording  (v2)
 
-// CRC8 for RunCam Device Protocol — polynomial 0x31
-// This is DIFFERENT from crc8_dvbs2 (poly 0xD5) used for SmartAudio.
-// RunCam spec confirmed at support.runcam.com/hc/en-us/articles/360014537794
+// CRC8 poly 0x31 — legacy RunCam-Split (0x55-header) protocol. Now UNUSED.
+// RCDEVICE (0xCC-header) uses crc8_dvbs2 (poly 0xD5). Kept for reference.
 static uint8_t crc8_rcdp(const uint8_t* buf, uint8_t len) {
   uint8_t crc = 0x00;
   while (len--) {
@@ -939,8 +949,8 @@ static void runcamSendCmd(uint8_t cmdId, const uint8_t* data, uint8_t dataLen) {
   //
   // Previous firmware inserted a dataLen byte after cmdId — this was WRONG
   // and caused every command to be parsed incorrectly by the RunCam.
-  // Previous firmware used crc8_dvbs2 (poly 0xD5) — this was WRONG.
-  // Correct CRC uses polynomial 0x31.
+  // RCDEVICE protocol uses CRC8/DVB-S2 (poly 0xD5) — NOT crc8_rcdp (poly 0x31),
+  // which is the legacy RunCam-Split (0x55-header) protocol.
   uint8_t frame[8];
   uint8_t i = 0;
   frame[i++] = RCDP_HEADER;   // 0xCC
@@ -948,26 +958,28 @@ static void runcamSendCmd(uint8_t cmdId, const uint8_t* data, uint8_t dataLen) {
   for (uint8_t d = 0; d < dataLen && i < 7; d++) {
     frame[i++] = data[d];
   }
+  // RCDEVICE protocol uses CRC8/DVB-S2 (poly 0xD5), the SAME routine as SmartAudio —
+  // NOT crc8_rcdp (poly 0x31), which is the legacy RunCam-Split (0x55-header) protocol.
   uint8_t rcdpCrcLen = i;
-  frame[i++] = crc8_rcdp(frame, rcdpCrcLen);   // CRC covers all preceding bytes
+  frame[i++] = crc8_dvbs2(frame, rcdpCrcLen);  // CRC over 0xCC .. last data byte
   CAM_SERIAL.write(frame, i);
   CAM_SERIAL.flush();
 }
 
+// If the Split 4 ignores explicit start/stop on its firmware, change RCDP_ACT_START/STOP back to
+// RCDP_ACT_POWER (0x01) toggle.
 void runcamStartRecording() {
-  if (camRecording) return;
-  uint8_t action = RCDP_ACT_POWER;   // Toggle — compatible with factory Split 4 firmware
+  uint8_t action = RCDP_ACT_START;        // 0x03 explicit start (idempotent)
   runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
   camRecording = true;
-  Serial.println(F("[CAM] Recording started (RCDP POWER toggle)"));
+  Serial.println(F("[CAM] START_RECORDING sent (RCDP 0x01/0x03)"));
 }
 
 void runcamStopRecording() {
-  if (!camRecording) return;
-  uint8_t action = RCDP_ACT_POWER;   // Toggle — compatible with factory Split 4 firmware
+  uint8_t action = RCDP_ACT_STOP;         // 0x04 explicit stop (idempotent)
   runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
   camRecording = false;
-  Serial.println(F("[CAM] Recording stopped (RCDP POWER toggle)"));
+  Serial.println(F("[CAM] STOP_RECORDING sent (RCDP 0x01/0x04)"));
 }
 
 bool initRunCam() {
@@ -1027,7 +1039,7 @@ void setGroundMode(GroundMode newMode) {
       // RunCam's own SD recording is a separate concern — operators can
       // use CMD_CAM_RECORD_ON separately if they want internal recording too.
       Serial.print(F("[MODE] LAUNCH_READY: VTX → "));
-      const char* pwrLbls[]={"25mW","200mW","500mW","1000mW"};
+      const char* pwrLbls[]={"200mW","400mW","800mW","1000mW"};
       Serial.print(vtxFlightPower<=3 ? pwrLbls[vtxFlightPower] : "?");
       Serial.println(F(", telem live, FSM armed"));
       break;
@@ -1211,10 +1223,11 @@ void calibratePad() {
 void fireSolenoid() {
   if (solenoidFired) return;
   digitalWrite(PIN_SOLENOID, HIGH); tSolenoidFired=millis(); solenoidFired=true;
-  Serial.println("[SOLENOID] OPEN — 12 s hold");
+  Serial.println("[SOLENOID] OPEN — latched open for remainder of flight");
 }
 void updateSolenoid() {
-  if (solenoidFired && (millis()-tSolenoidFired>=SOLENOID_HOLD_MS)) digitalWrite(PIN_SOLENOID, LOW);
+  // Valve latches OPEN for the remainder of the flight once fired (no auto-close).
+  // Intentionally empty: PIN_SOLENOID stays HIGH from fireSolenoid() until power-down.
 }
 #endif
 

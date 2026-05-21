@@ -98,7 +98,7 @@ FAULT_NAMES = {
     0x08: "LORA", 0x10: "SD",   0x20: "OSD",  0x40: "CAM",
 }
 
-VTX_POWER_LABELS = {0: "25mW", 1: "200mW", 2: "500mW", 3: "1000mW"}
+VTX_POWER_LABELS = {0: "200mW", 1: "400mW", 2: "800mW", 3: "1000mW"}
 
 # -----------------------------------------------------------------------------
 #  FLIGHT DATA PACKET  (downlink, PKT_DATA)
