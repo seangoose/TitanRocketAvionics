@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=TRES Ground Station
+Comment=TRES Titan Ground Station
+Exec=sudo systemctl restart tres-groundstation
+Icon=utilities-terminal
+Terminal=false
+StartupNotify=false

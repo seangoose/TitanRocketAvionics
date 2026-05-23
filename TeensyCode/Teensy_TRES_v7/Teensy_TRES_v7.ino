@@ -143,17 +143,17 @@
 #define VTX_PWR_OFF     0
 
 // ── AKK Race Ranger SmartAudio power table ───────────────────────────────────────
-// The Race Ranger is SmartAudio V2.1: power is set as a dBm value with bit 0x80 set,
-// NOT a raw 0..3 index. We keep a 0..3 index everywhere else and map it here.
-// Default = US Race Ranger (200/400/800/1000 mW = 23/26/29/30 dBm).
-//   index 0 -> 200mW  (23dBm) 0x97
-//   index 1 -> 400mW  (26dBm) 0x9A
-//   index 2 -> 800mW  (29dBm) 0x9D
-//   index 3 -> 1000mW (30dBm) 0x9E
-// BENCH-VERIFY FALLBACKS:
+// The Race Ranger uses SmartAudio V2.0: power is a raw index 0..3.
+// V2.1 dBm encoding (e.g. 0x97 = 23dBm|0x80) was tried but silently ignored —
+// SET_CHANNEL (freq) is the same in both versions so that always worked.
+//   index 0 -> 200mW  0x00
+//   index 1 -> 400mW  0x01
+//   index 2 -> 800mW  0x02
+//   index 3 -> 1000mW 0x03
+// V2.1 dBm fallback (if swapping to a V2.1 VTX):
+//   US Race Ranger V2.1 (200/400/800/1000mW):      {0x97,0x9A,0x9D,0x9E}
 //   International Race Ranger (25/400/800/1600mW): {0x8E,0x9A,0x9D,0xA0}
-//   SmartAudio V2.0 raw-index devices:             {0x00,0x01,0x02,0x03}
-static const uint8_t VTX_PWR_WIRE[4] = {0x97, 0x9A, 0x9D, 0x9E};
+static const uint8_t VTX_PWR_WIRE[4] = {0x00, 0x01, 0x02, 0x03};
 
 // ================================================================
 //  ALTITUDE FILTER

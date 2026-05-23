@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TRES Titan — Live Map</title>
+
+  <!--
+    FULLY OFFLINE — NO CDN, NO EXTERNAL REQUESTS.
+    Leaflet JS and CSS are loaded from assets/ on the local disk.
+    Run:  python3 setup_offline.py
+    before going to the competition site to populate assets/ and tile_cache/.
+  -->
+  <link  rel="stylesheet" href="leaflet.css"/>
+  <script src="leaflet.js"></script>
+
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body, #map { width:100%; height:100%; background:#1a1a2e; }
+    .leaflet-popup-content-wrapper {
+      background:#16213e; color:#e2e2e2;
+      border:1px solid #0f3460; border-radius:6px;
+    }
+    .leaflet-popup-tip { background:#16213e; }
+    .tracker-label {
+      background:transparent; border:none;
+      color:#fff; font-size:11px; font-weight:bold;
+      text-shadow:0 0 4px #000,0 0 4px #000; white-space:nowrap;
+    }
+    #info-overlay {
+      position:absolute; bottom:8px; left:8px; z-index:1000;
+      background:rgba(22,33,62,0.90); color:#e2e2e2;
+      padding:8px 12px; border-radius:6px;
+      font-family:monospace; font-size:12px;
+      min-width:220px; pointer-events:none;
+    }
+    #info-overlay .row { margin:2px 0; }
+    #info-overlay .lbl { color:#8b9dc3; margin-right:6px; }
+    #info-overlay .sep { border-top:1px solid #30363d; margin:5px 0; }
+    #tile-warning {
+      display:none; position:absolute;
+      top:8px; left:50%; transform:translateX(-50%);
+      z-index:2000; background:rgba(160,60,0,0.92); color:#ffe0c0;
+      padding:6px 14px; border-radius:6px;
+      font-size:12px; font-family:monospace; pointer-events:none;
+    }
+    #no-gps-overlay {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      z-index:1500; text-align:center; pointer-events:none;
+    }
+    #no-gps-overlay .icon { font-size:32px; display:block; margin-bottom:8px; opacity:0.6; }
+    #no-gps-overlay .msg  {
+      background:rgba(22,33,62,0.90); color:#8b9dc3;
+      padding:10px 20px; border-radius:8px;
+      font-family:monospace; font-size:13px; border:1px solid #0f3460;
+      white-space:nowrap;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="tile-warning">Tile cache missing — run: python3 setup_offline.py</div>
+<div id="no-gps-overlay">
+  <span class="icon">📡</span>
+  <div class="msg">Waiting for Featherweight GPS…<br>No tracker position received yet.</div>
+</div>
+
+<div id="info-overlay">
+  <div class="row"><span class="lbl">S1</span><span id="s1-state">—</span></div>
+  <div class="row"><span class="lbl">&nbsp;&nbsp;Alt:</span><span id="s1-alt">—</span> ft</div>
+  <div class="row"><span class="lbl">&nbsp;&nbsp;Vel:</span><span id="s1-vel">—</span> fps</div>
+  <div class="sep"></div>
+  <div class="row"><span class="lbl">S2</span><span id="s2-state">—</span></div>
+  <div class="row"><span class="lbl">&nbsp;&nbsp;Alt:</span><span id="s2-alt">—</span> ft</div>
+  <div class="row"><span class="lbl">&nbsp;&nbsp;Vel:</span><span id="s2-vel">—</span> fps</div>
+  <div class="sep"></div>
+  <div class="row"><span class="lbl">GPS S1:</span><span id="gps-s1">—</span></div>
+  <div class="row"><span class="lbl">GPS S2:</span><span id="gps-s2">—</span></div>
+</div>
+
+<script>
+// Center/zoom are injected by map_widget._build_html() at runtime
+var mapCenter = [35.3462467793672, -117.81008271636995];
+var mapZoom   = 15;
+
+var map = L.map('map', {
+  center: mapCenter, zoom: mapZoom,
+  zoomControl: true, attributionControl: true
+});
+
+// ── OFFLINE tile layer (primary, always works after setup_offline.py) ─
+var offlineTiles = L.tileLayer(
+  '../tile_cache/{z}/{x}/{y}.png',
+  {
+    attribution: 'Map © OpenStreetMap contributors (offline cache)',
+    maxZoom: 17,
+    // Transparent 1×1 PNG on cache miss — no broken image icon
+    errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII='
+  }
+);
+
+// ── ONLINE layers (optional — fail gracefully when offline) ───────────
+var esriSat = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution: 'Tiles © Esri', maxZoom: 19, maxNativeZoom: 18 }
+);
+var osmLive = L.tileLayer(
+  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { attribution: '© OpenStreetMap', maxZoom: 19 }
+);
+
+// ── Start with offline cache — guaranteed to work ─────────────────────
+offlineTiles.addTo(map);
+
+// Show warning banner if tiles are missing from the cache
+var tileErrorShown = false;
+offlineTiles.on('tileerror', function() {
+  if (!tileErrorShown) {
+    document.getElementById('tile-warning').style.display = 'block';
+    tileErrorShown = true;
+  }
+});
+offlineTiles.on('tileload', function() {
+  document.getElementById('tile-warning').style.display = 'none';
+  tileErrorShown = false;
+});
+
+// Layer switcher
+L.control.layers(
+  {
+    'Offline Cache (primary)': offlineTiles,
+    'Satellite — ESRI (needs internet)': esriSat,
+    'Road Map — OSM (needs internet)': osmLive
+  },
+  {},
+  { position: 'topright', collapsed: true }
+).addTo(map);
+
+// ── Icons ─────────────────────────────────────────────────────────────
+function circleIcon(fill) {
+  return L.divIcon({
+    html: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">'
+        + '<circle cx="9" cy="9" r="7" fill="' + fill + '" stroke="#fff" stroke-width="2"/>'
+        + '<circle cx="9" cy="9" r="3" fill="#fff"/></svg>',
+    className:'', iconSize:[18,18], iconAnchor:[9,9]
+  });
+}
+
+// ── Pad marker ────────────────────────────────────────────────────────
+var padMarker = L.marker(mapCenter, {
+  icon: L.divIcon({
+    html:'<div style="width:12px;height:12px;background:#ffcc00;border:2px solid #333;transform:rotate(45deg)"></div>',
+    className:'', iconSize:[12,12], iconAnchor:[6,6]
+  }),
+  title:'Launch Pad'
+}).bindTooltip('Launch Pad',{permanent:true,direction:'top',className:'tracker-label'})
+  .addTo(map);
+
+// ── Tracks and GPS markers ────────────────────────────────────────────
+var gps1Marker = null, gps2Marker = null;
+var s1Track = L.polyline([],{color:'#ff6b35',weight:2.5,opacity:0.9}).addTo(map);
+var s2Track = L.polyline([],{color:'#4ecdc4',weight:2.5,opacity:0.9}).addTo(map);
+
+L.control.layers({},{
+  'S1 GPS Track': s1Track,
+  'S2 GPS Track': s2Track
+},{position:'topright',collapsed:true}).addTo(map);
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PUBLIC API  (called via page.runJavaScript() from Python)
+// ═══════════════════════════════════════════════════════════════════════
+
+function updateRocketGPS(stage, lat, lon, altFt, vertVel, name) {
+  document.getElementById('no-gps-overlay').style.display = 'none';
+  var ll  = [lat, lon];
+  var tip = name + '\n' + altFt.toFixed(0) + ' ft  ' + vertVel.toFixed(0) + ' fps';
+  if (stage === 1) {
+    if (!gps1Marker) {
+      gps1Marker = L.marker(ll,{icon:circleIcon('#ff6b35'),zIndexOffset:1000})
+        .bindTooltip(tip,{permanent:true,direction:'top',className:'tracker-label'})
+        .addTo(map);
+    } else { gps1Marker.setLatLng(ll); gps1Marker.setTooltipContent(tip); }
+    s1Track.addLatLng(ll);
+    document.getElementById('gps-s1').textContent = lat.toFixed(5)+', '+lon.toFixed(5);
+  } else {
+    if (!gps2Marker) {
+      gps2Marker = L.marker(ll,{icon:circleIcon('#4ecdc4'),zIndexOffset:1000})
+        .bindTooltip(tip,{permanent:true,direction:'top',className:'tracker-label'})
+        .addTo(map);
+    } else { gps2Marker.setLatLng(ll); gps2Marker.setTooltipContent(tip); }
+    s2Track.addLatLng(ll);
+    document.getElementById('gps-s2').textContent = lat.toFixed(5)+', '+lon.toFixed(5);
+  }
+}
+
+function updateTelemetry(stage, altFt, velFps, stateName) {
+  var p = stage === 1 ? 's1' : 's2';
+  document.getElementById(p+'-state').textContent = stateName;
+  document.getElementById(p+'-alt').textContent   = altFt.toFixed(0);
+  document.getElementById(p+'-vel').textContent   = velFps.toFixed(1);
+}
+
+function showLostRocket(name, lat, lon, altFt) {
+  var icon = L.divIcon({
+    html:'<div style="width:14px;height:14px;background:#f00;border:2px solid #fff;border-radius:2px;transform:rotate(45deg)"></div>',
+    className:'', iconSize:[14,14], iconAnchor:[7,7]
+  });
+  L.marker([lat,lon],{icon:icon})
+   .bindPopup('<b>LOST ROCKET</b><br>'+name+'<br>'+lat.toFixed(5)+', '+lon.toFixed(5)+'<br>'+altFt.toFixed(0)+' ft')
+   .addTo(map);
+}
+
+function setPadLocation(lat, lon, zoom) {
+  padMarker.setLatLng([lat,lon]);
+  map.setView([lat,lon], zoom !== undefined ? zoom : mapZoom);
+}
+
+function clearTracks() {
+  s1Track.setLatLngs([]); s2Track.setLatLngs([]);
+  if (gps1Marker) { map.removeLayer(gps1Marker); gps1Marker=null; }
+  if (gps2Marker) { map.removeLayer(gps2Marker); gps2Marker=null; }
+  ['s1-state','s1-alt','s1-vel','s2-state','s2-alt','s2-vel','gps-s1','gps-s2']
+    .forEach(function(id){ document.getElementById(id).textContent='—'; });
+  document.getElementById('no-gps-overlay').style.display = 'block';
+}
+</script>
+</body>
+</html>
