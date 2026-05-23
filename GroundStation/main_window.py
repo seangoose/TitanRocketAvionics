@@ -565,23 +565,24 @@ class CommandPanel(QWidget):
         vgl.addWidget(self._vtx_set_s2_btn, 2, 2)
 
         pwr_labels = ["200mW", "400mW", "800mW", "1W"]
+
         vgl.addWidget(QLabel("S1 Flt Pwr:"), 3, 0)
-        self._vp_s1_btns = []
-        vpg1 = QHBoxLayout()
-        for idx in range(4):
-            b = self._mkbtn(pwr_labels[idx], lambda i=idx: self._send_vtx_power(1, i))
-            b.setToolTip(f"S1 VTX flight power SA index {idx}")
-            self._vp_s1_btns.append(b); vpg1.addWidget(b)
-        vgl.addLayout(vpg1, 3, 1, 1, 3)
+        self._vp_s1_combo = QComboBox()
+        for lbl in pwr_labels: self._vp_s1_combo.addItem(lbl)
+        self._vp_s1_combo.setMinimumWidth(90)
+        vgl.addWidget(self._vp_s1_combo, 3, 1)
+        self._vp_s1_set_btn = self._mkbtn("Set S1",
+            lambda: self._send_vtx_power(1, self._vp_s1_combo.currentIndex()), "confirm")
+        vgl.addWidget(self._vp_s1_set_btn, 3, 2)
 
         vgl.addWidget(QLabel("S2 Flt Pwr:"), 4, 0)
-        self._vp_s2_btns = []
-        vpg2 = QHBoxLayout()
-        for idx in range(4):
-            b = self._mkbtn(pwr_labels[idx], lambda i=idx: self._send_vtx_power(2, i))
-            b.setToolTip(f"S2 VTX flight power SA index {idx}")
-            self._vp_s2_btns.append(b); vpg2.addWidget(b)
-        vgl.addLayout(vpg2, 4, 1, 1, 3)
+        self._vp_s2_combo = QComboBox()
+        for lbl in pwr_labels: self._vp_s2_combo.addItem(lbl)
+        self._vp_s2_combo.setMinimumWidth(90)
+        vgl.addWidget(self._vp_s2_combo, 4, 1)
+        self._vp_s2_set_btn = self._mkbtn("Set S2",
+            lambda: self._send_vtx_power(2, self._vp_s2_combo.currentIndex()), "confirm")
+        vgl.addWidget(self._vp_s2_set_btn, 4, 2)
         layout.addWidget(vg)
 
         # ── 5. TELEMETRY ────────────────────────────────────────
@@ -764,12 +765,13 @@ class CommandPanel(QWidget):
         btn.style().unpolish(btn); btn.style().polish(btn)
         btn.blockSignals(False)
 
-        # ── VTX flight power highlight ───────────────────────────────
+        # ── VTX flight power — sync combo to confirmed STATUS ────────
         pwr = d.get("vtx_flight_power", -1)
-        btns = self._vp_s1_btns if stage == 1 else self._vp_s2_btns
-        for i, b in enumerate(btns):
-            b.setObjectName("confirm" if i == pwr else "")
-            b.style().unpolish(b); b.style().polish(b)
+        combo = self._vp_s1_combo if stage == 1 else self._vp_s2_combo
+        if 0 <= pwr <= 3:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(pwr)
+            combo.blockSignals(False)
 
         # ── LoRa confirmed frequency → remove "Set" highlight if in sync ──
         freq = d.get("lora_freq_mhz")
@@ -1374,14 +1376,12 @@ class MainWindow(QMainWindow):
         g3l.addWidget(QLabel("S2 VTX:"),               2, 0)
         g3l.addWidget(self._cmd_panel._vtx_s2_edit,    2, 1)
         g3l.addWidget(self._cmd_panel._vtx_set_s2_btn, 2, 2)
-        g3l.addWidget(QLabel("S1 Flt Pwr:"),           3, 0)
-        s1_pwr = QHBoxLayout()
-        for b in self._cmd_panel._vp_s1_btns: s1_pwr.addWidget(b)
-        g3l.addLayout(s1_pwr, 3, 1, 1, 2)
-        g3l.addWidget(QLabel("S2 Flt Pwr:"),           4, 0)
-        s2_pwr = QHBoxLayout()
-        for b in self._cmd_panel._vp_s2_btns: s2_pwr.addWidget(b)
-        g3l.addLayout(s2_pwr, 4, 1, 1, 2)
+        g3l.addWidget(QLabel("S1 Flt Pwr:"),                3, 0)
+        g3l.addWidget(self._cmd_panel._vp_s1_combo,         3, 1)
+        g3l.addWidget(self._cmd_panel._vp_s1_set_btn,       3, 2)
+        g3l.addWidget(QLabel("S2 Flt Pwr:"),                4, 0)
+        g3l.addWidget(self._cmd_panel._vp_s2_combo,         4, 1)
+        g3l.addWidget(self._cmd_panel._vp_s2_set_btn,       4, 2)
         bar_layout.addWidget(g3)
 
         # ── Group 4 — Telemetry / LoRa (with local target selector) ──
