@@ -400,7 +400,7 @@ GroundMode    groundMode   = GM_TEST_IDLE;
 
 // Task timers
 unsigned long tSensor=0, tSD=0, tTelem=0, tOSD=0,
-              tDebug=0, tHeartbeat=0;
+              tDebug=0, tHeartbeat=0, tCamProbe=0;
 
 // OSD mission elapsed time — starts from liftoff detection
 unsigned long tOSDLiftoff = 0;   // Set when FSM detects launch
@@ -984,26 +984,37 @@ void runcamStopRecording() {
 
 bool initRunCam() {
   CAM_SERIAL.begin(CAM_BAUD);
-  delay(500);  // Allow RunCam to fully boot before sending commands
-  runcamSendCmd(RCDP_CMD_INFO, nullptr, 0);  // 0x00 get device info
+  // RunCam Split 4 needs 2-3 s to boot — wait before first probe.
+  delay(2000);
 
-  // RunCam responds to GET_DEVICE_INFO with 5 bytes if camera is live.
-  // Wait up to 300ms for any response.
-  uint32_t t0 = millis();
-  while (!CAM_SERIAL.available() && (millis() - t0) < 300);
+  // Try up to 3 times with 500 ms between attempts.
+  for (uint8_t attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) delay(500);
 
-  bool camResponded = (CAM_SERIAL.available() > 0);
-  while (CAM_SERIAL.available()) CAM_SERIAL.read();  // Flush
+    runcamSendCmd(RCDP_CMD_INFO, nullptr, 0);  // 0x00 get device info
 
-  if (!camResponded) {
-    faultFlags |= FAULT_CAM;
-    Serial.println("[CAM] WARNING — no RCDP response. Verify RunCam power and TX/RX wiring.");
-    Serial.println("[CAM] RunCam must be fully booted BEFORE Teensy power-on.");
-  } else {
-    Serial.println("[CAM] RCDP response received — RunCam is live");
-    faultFlags &= ~FAULT_CAM;  // Clear fault if previously set
+    // Wait up to 300 ms for any response byte.
+    uint32_t t0 = millis();
+    while (!CAM_SERIAL.available() && (millis() - t0) < 300);
+
+    bool camResponded = (CAM_SERIAL.available() > 0);
+    while (CAM_SERIAL.available()) CAM_SERIAL.read();  // Flush
+
+    if (camResponded) {
+      Serial.print(F("[CAM] RCDP response received (attempt "));
+      Serial.print(attempt + 1);
+      Serial.println(F(") — RunCam is live"));
+      faultFlags &= ~FAULT_CAM;
+      return true;
+    }
+    Serial.print(F("[CAM] No response on attempt "));
+    Serial.print(attempt + 1);
+    Serial.println(F("/3"));
   }
-  return camResponded;
+
+  faultFlags |= FAULT_CAM;
+  Serial.println(F("[CAM] WARNING — RunCam did not respond. Will retry in background."));
+  return false;
 }
 
 // ================================================================
@@ -1034,10 +1045,10 @@ void setGroundMode(GroundMode newMode) {
     case GM_LAUNCH_READY:
       // Full power: VTX live at configured power, telem at configured rate.
       vtxSetPower(vtxFlightPower);
-      // RunCam FPV analog output is always-on when camera is powered.
-      // The VTX going to flight power is what starts live video transmission.
-      // RunCam's own SD recording is a separate concern — operators can
-      // use CMD_CAM_RECORD_ON separately if they want internal recording too.
+      // Auto-start RunCam SD recording when armed. If FAULT_CAM is set the
+      // send is still attempted — a live camera that wasn't detected at boot
+      // will respond here and the periodic probe will clear the fault.
+      runcamStartRecording();
       Serial.print(F("[MODE] LAUNCH_READY: VTX → "));
       const char* pwrLbls[]={"200mW","400mW","800mW","1000mW"};
       Serial.print(vtxFlightPower<=3 ? pwrLbls[vtxFlightPower] : "?");
@@ -1693,6 +1704,23 @@ void loop() {
     Serial.print(F("m/s² MODE:")); Serial.print(groundModeStr(groundMode));
     Serial.print(F(" FLT:0x")); Serial.print(faultFlags,HEX);
     Serial.print(F(" CAM:")); Serial.println(camRecording?F("REC"):F("idle"));
+  }
+
+  // ── 30 s: RunCam background re-probe (only while FAULT_CAM set) ─
+  // Clears FAULT_CAM automatically once the camera is live, without
+  // requiring a Teensy reboot (covers slow-boot and power-sequencing cases).
+  if ((faultFlags & FAULT_CAM) && (now - tCamProbe >= 30000UL)) {
+    tCamProbe = now;
+    Serial.println(F("[CAM] Re-probing RunCam (FAULT_CAM set)…"));
+    runcamSendCmd(RCDP_CMD_INFO, nullptr, 0);
+    uint32_t t0 = millis();
+    while (!CAM_SERIAL.available() && (millis() - t0) < 300);
+    bool ok = (CAM_SERIAL.available() > 0);
+    while (CAM_SERIAL.available()) CAM_SERIAL.read();
+    if (ok) {
+      faultFlags &= ~FAULT_CAM;
+      Serial.println(F("[CAM] RunCam now live — FAULT_CAM cleared"));
+    }
   }
 
   // ── Mission clock failsafe ────────────────────────────────────
