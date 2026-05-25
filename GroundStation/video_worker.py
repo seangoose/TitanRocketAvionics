@@ -151,16 +151,28 @@ class VideoWorker(QThread):
             actual_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             actual_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             actual_fps = cap.get(cv2.CAP_PROP_FPS)
+            # Many V4L2 capture cards report 0 fps before the first frame is read.
+            # Guard here — a VideoWriter opened with fps=0 silently discards every write.
+            if actual_fps <= 0:
+                actual_fps = float(self.fps)
 
-            # Update writer dimensions to match what the driver actually gave us
+            # Re-open the writer only if the driver gave us different dimensions than
+            # what we opened with.  Previously this ran unconditionally, which caused
+            # the writer to be torn down and rebuilt with fps=0 every camera connect,
+            # resulting in a 258-byte empty MP4 (the competition recording failure).
             with self._rec_lock:
                 if self._is_recording and self._writer:
-                    # Dimensions mismatch — restart writer at correct size
-                    self._writer.release()
-                    fourcc = cv2.VideoWriter_fourcc(*VIDEO_CODEC)
-                    self._writer = cv2.VideoWriter(
-                        self._rec_path, fourcc, actual_fps,
-                        (actual_w, actual_h))
+                    if actual_w != self.width or actual_h != self.height:
+                        self._writer.release()
+                        fourcc = cv2.VideoWriter_fourcc(*VIDEO_CODEC)
+                        new_w = cv2.VideoWriter(
+                            self._rec_path, fourcc, actual_fps,
+                            (actual_w, actual_h))
+                        if new_w.isOpened():
+                            self._writer = new_w
+                        else:
+                            # Failed to reopen — keep the old writer rather than losing frames
+                            new_w.release()
 
             self.connection_changed.emit(self.stage, True)
             self.status_message.emit(self.stage,
