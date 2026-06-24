@@ -19,7 +19,6 @@
 #               Vel +VVEL +HVEL +SPARE Fix N # SATS ...
 # =============================================================================
 
-import math
 import serial
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -48,8 +47,6 @@ class FWGPSWorker(QThread):
         self.baud      = baud
         self._running  = False
         self._last_batt_v = 0.0
-        self._last_valid_lat: float | None = None
-        self._last_valid_lon: float | None = None
 
     def stop(self):
         self._running = False
@@ -87,22 +84,6 @@ class FWGPSWorker(QThread):
                 continue
             self.raw_log.emit(f"[FW GPS] {line}")
             self._parse_line(line)
-
-    # ------------------------------------------------------------------
-
-    def _haversine_distance_m(self, lat1: float, lon1: float,
-                               lat2: float, lon2: float) -> float:
-        """Great-circle distance in metres between two lat/lon points."""
-        if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
-            return 0.0
-        R    = 6371000.0
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        dphi = math.radians(lat2 - lat1)
-        dlam = math.radians(lon2 - lon1)
-        a = (math.sin(dphi / 2) ** 2 +
-             math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2)
-        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
     # ------------------------------------------------------------------
 
@@ -166,19 +147,14 @@ class FWGPSWorker(QThread):
         self.raw_log.emit(
             f"[FW GPS] POS {name}  {lat:.5f},{lon:.5f}  {alt_ft:.0f}ft")
 
-        if self._last_valid_lat is not None:
-            distance_m = self._haversine_distance_m(
-                self._last_valid_lat, self._last_valid_lon, lat, lon)
-            MAX_JUMP_M = 152.4  # 500 feet
-            if distance_m > MAX_JUMP_M:
-                self.raw_log.emit(
-                    f"[FW GPS] REJECTED noise spike: {name} jumped {distance_m:.0f}m "
-                    f"from last valid position ({self._last_valid_lat:.5f},"
-                    f"{self._last_valid_lon:.5f}) → ({lat:.5f},{lon:.5f})")
-                return
-
-        self._last_valid_lat = lat
-        self._last_valid_lon = lon
+        # NOTE: No client-side noise filtering. Every parsed position is emitted
+        # exactly as the Featherweight tracker reports it. A previous distance-
+        # gate ("reject jumps > 500 ft from the last position") was removed
+        # because it suppressed all output: with Stage 1 and Stage 2 tracked on
+        # the SAME frequency, consecutive packets alternate between two trackers
+        # that are far apart, so every other packet looked like a noise spike
+        # and was rejected. The occasional outlier ping is acceptable — the
+        # tracker position is correct the vast majority of the time.
         self.position_update.emit(name, lat, lon, alt_ft, vert_vel, horiz_vel)
 
     def _parse_rx_nomtk(self, tokens: list):
@@ -248,8 +224,6 @@ class FWGPSWorker(QThread):
             self.raw_log.emit(f"[FW GPS] LOST parse error: {e}")
             return
 
-        self._last_valid_lat = None
-        self._last_valid_lon = None
         self.lost_rocket.emit(name, lat, lon, alt_ft)
         self.raw_log.emit(
             f"[FW GPS] LOST/FND: {name} @ {lat:.5f},{lon:.5f} {alt_ft:.0f}ft")

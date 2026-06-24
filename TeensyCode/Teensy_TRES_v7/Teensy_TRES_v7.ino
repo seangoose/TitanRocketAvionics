@@ -438,7 +438,9 @@ uint8_t osdVideoRows = OSD_ROWS_NTSC;
 bool    osdReady     = false;
 
 // RunCam state
-bool camRecording = false;
+bool     camRecording = false;
+uint16_t camFeatures  = 0;       // Feature bits from GET_DEVICE_INFO (0 = unknown)
+bool     camUsePowerToggle = true; // Split 4 default: drive recording via 0x01 toggle
 
 // Uplink RX buffer
 uint8_t rxBuf[RH_RF95_MAX_MESSAGE_LEN];
@@ -924,9 +926,17 @@ bool initVTX() {
 #define RCDP_CMD_INFO     0x00
 #define RCDP_CMD_CTRL     0x01
 #define RCDP_ACT_WIFI     0x00
-#define RCDP_ACT_POWER    0x01   // Toggle (v1 fallback)
-#define RCDP_ACT_START    0x03   // Explicit start recording (v2)
-#define RCDP_ACT_STOP     0x04   // Explicit stop recording  (v2)
+#define RCDP_ACT_POWER    0x01   // Simulate power button = toggle record (Split 4 method)
+#define RCDP_ACT_START    0x03   // Explicit start recording (v2) — IGNORED by Split 4 firmware
+#define RCDP_ACT_STOP     0x04   // Explicit stop recording  (v2) — IGNORED by Split 4 firmware
+
+// RCDEVICE device-info feature bits (from GET_DEVICE_INFO response, uint16 LE).
+// Used to confirm whether the camera honors explicit start/stop or needs the
+// power-button toggle. The Split 4 reports power-button support but NOT
+// start/stop recording, so we always drive recording via the 0x01 toggle.
+#define RCDP_FEAT_POWER_BTN   (1 << 0)
+#define RCDP_FEAT_START_REC   (1 << 6)
+#define RCDP_FEAT_STOP_REC    (1 << 7)
 
 // CRC8 poly 0x31 — legacy RunCam-Split (0x55-header) protocol. Now UNUSED.
 // RCDEVICE (0xCC-header) uses crc8_dvbs2 (poly 0xD5). Kept for reference.
@@ -966,20 +976,40 @@ static void runcamSendCmd(uint8_t cmdId, const uint8_t* data, uint8_t dataLen) {
   CAM_SERIAL.flush();
 }
 
-// If the Split 4 ignores explicit start/stop on its firmware, change RCDP_ACT_START/STOP back to
-// RCDP_ACT_POWER (0x01) toggle.
+// RunCam Split 4 firmware IGNORES the explicit start/stop recording actions
+// (0x03/0x04). The only reliable way to control recording is the power-button
+// TOGGLE (action 0x01), which flips record on<->off while the camera is in
+// VIDEO mode — exactly like physically tapping the button.
+//
+// Because 0x01 is a TOGGLE (not idempotent), the camRecording flag MUST always
+// track the true camera state, and start/stop are guarded so a repeated command
+// can never invert the recording state.
+//
+// camUsePowerToggle is set from the device-info feature bits at init. If a
+// future camera reports explicit start/stop support (bits 6/7), it will use the
+// direct 0x03/0x04 actions instead.
 void runcamStartRecording() {
-  uint8_t action = RCDP_ACT_START;        // 0x03 explicit start (idempotent)
+  if (camRecording) {                       // already recording — do NOT toggle off
+    Serial.println(F("[CAM] START ignored — already recording"));
+    return;
+  }
+  uint8_t action = camUsePowerToggle ? RCDP_ACT_POWER : RCDP_ACT_START;
   runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
   camRecording = true;
-  Serial.println(F("[CAM] START_RECORDING sent (RCDP 0x01/0x03)"));
+  if (camUsePowerToggle) Serial.println(F("[CAM] START via power-toggle (RCDP 0x01/0x01)"));
+  else                   Serial.println(F("[CAM] START via explicit cmd (RCDP 0x01/0x03)"));
 }
 
 void runcamStopRecording() {
-  uint8_t action = RCDP_ACT_STOP;         // 0x04 explicit stop (idempotent)
+  if (!camRecording) {                      // already stopped — do NOT toggle on
+    Serial.println(F("[CAM] STOP ignored — not recording"));
+    return;
+  }
+  uint8_t action = camUsePowerToggle ? RCDP_ACT_POWER : RCDP_ACT_STOP;
   runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
   camRecording = false;
-  Serial.println(F("[CAM] STOP_RECORDING sent (RCDP 0x01/0x04)"));
+  if (camUsePowerToggle) Serial.println(F("[CAM] STOP via power-toggle (RCDP 0x01/0x01)"));
+  else                   Serial.println(F("[CAM] STOP via explicit cmd (RCDP 0x01/0x04)"));
 }
 
 bool initRunCam() {
@@ -988,32 +1018,63 @@ bool initRunCam() {
   delay(2000);
 
   // Try up to 3 times with 500 ms between attempts.
+  // The GET_DEVICE_INFO (0x00) response is 5 bytes:
+  //   [0xCC][protocolVer][featureLow][featureHigh][CRC8/DVB-S2]
+  // We parse the feature bits to decide how to drive recording.
   for (uint8_t attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) delay(500);
 
+    while (CAM_SERIAL.available()) CAM_SERIAL.read();  // Flush stale bytes first
     runcamSendCmd(RCDP_CMD_INFO, nullptr, 0);  // 0x00 get device info
 
-    // Wait up to 300 ms for any response byte.
+    // Collect up to 5 response bytes within a 300 ms window.
+    uint8_t  resp[5];
+    uint8_t  n = 0;
     uint32_t t0 = millis();
-    while (!CAM_SERIAL.available() && (millis() - t0) < 300);
-
-    bool camResponded = (CAM_SERIAL.available() > 0);
-    while (CAM_SERIAL.available()) CAM_SERIAL.read();  // Flush
-
-    if (camResponded) {
-      Serial.print(F("[CAM] RCDP response received (attempt "));
-      Serial.print(attempt + 1);
-      Serial.println(F(") — RunCam is live"));
-      faultFlags &= ~FAULT_CAM;
-      return true;
+    while (n < 5 && (millis() - t0) < 300) {
+      if (CAM_SERIAL.available()) resp[n++] = CAM_SERIAL.read();
     }
-    Serial.print(F("[CAM] No response on attempt "));
-    Serial.print(attempt + 1);
-    Serial.println(F("/3"));
+
+    if (n == 0) {
+      Serial.print(F("[CAM] No response on attempt "));
+      Serial.print(attempt + 1);
+      Serial.println(F("/3"));
+      continue;
+    }
+
+    // Validate a well-formed 5-byte info frame (header + CRC over first 4 bytes).
+    if (n >= 5 && resp[0] == RCDP_HEADER) {
+      uint8_t crc = crc8_dvbs2(resp, 4);
+      if (crc == resp[4]) {
+        camFeatures = (uint16_t)resp[2] | ((uint16_t)resp[3] << 8);
+        // Use explicit start/stop ONLY if BOTH bits are advertised; else toggle.
+        bool explicitOk = (camFeatures & RCDP_FEAT_START_REC) &&
+                          (camFeatures & RCDP_FEAT_STOP_REC);
+        camUsePowerToggle = !explicitOk;
+        Serial.print(F("[CAM] RunCam live. Features=0x"));
+        Serial.print(camFeatures, HEX);
+        Serial.println(camUsePowerToggle ? F(" — using POWER-TOGGLE recording")
+                                         : F(" — using EXPLICIT start/stop"));
+        faultFlags &= ~FAULT_CAM;
+        return true;
+      }
+    }
+
+    // Got bytes but not a clean info frame — camera is alive; keep the safe
+    // default (power toggle). This still counts as a successful detection.
+    Serial.print(F("[CAM] RunCam responded (unparsed, "));
+    Serial.print(n);
+    Serial.println(F(" bytes) — defaulting to POWER-TOGGLE recording"));
+    camUsePowerToggle = true;
+    faultFlags &= ~FAULT_CAM;
+    return true;
   }
 
+  // No response at all: assume a Split 4 is present and default to the toggle
+  // so remote record commands still work once the camera finishes booting.
+  camUsePowerToggle = true;
   faultFlags |= FAULT_CAM;
-  Serial.println(F("[CAM] WARNING — RunCam did not respond. Will retry in background."));
+  Serial.println(F("[CAM] WARNING — RunCam did not respond. Will retry in background (POWER-TOGGLE default)."));
   return false;
 }
 
