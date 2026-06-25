@@ -43,6 +43,10 @@ CMD_SET_VTX_POWER   = 0x0F   # Extended: PLEN=1, uint8 SA index 0–3
 CMD_CAM_RECORD_ON   = 0x10   # Start RunCam internal recording
 CMD_CAM_RECORD_OFF  = 0x11   # Stop RunCam internal recording
 CMD_FULL_SYS_TEST   = 0x12   # Full system test — VTX + camera + telem + solenoid (S2)
+CMD_CAM_WIFI        = 0x13   # Toggle RunCam Wi-Fi (RCDEVICE action 0x00) — replaces broken Wi-Fi button
+CMD_CAM_TOGGLE      = 0x14   # Unconditional single power-button press (RCDEVICE action 0x01).
+                             # Always sends one toggle regardless of believed state — use as the
+                             # reliable record control and as a Teensy→camera link diagnostic.
 
 CMD_NAMES = {
     CMD_VIDEO_ON:       "VIDEO_ON",
@@ -63,6 +67,8 @@ CMD_NAMES = {
     CMD_CAM_RECORD_ON:  "CAM_RECORD_ON",
     CMD_CAM_RECORD_OFF: "CAM_RECORD_OFF",
     CMD_FULL_SYS_TEST:  "FULL_SYS_TEST",
+    CMD_CAM_WIFI:       "CAM_WIFI",
+    CMD_CAM_TOGGLE:     "CAM_TOGGLE",
 }
 
 # -----------------------------------------------------------------------------
@@ -254,5 +260,3 @@ def state_name(stage: int, state: int) -> str:
 
 def ground_mode_name(mode: int) -> str:
     return GROUND_MODE_NAMES.get(mode, f"UNKNOWN({mode})")
-
-

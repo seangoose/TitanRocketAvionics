@@ -530,6 +530,25 @@ class CommandPanel(QWidget):
         self._cam_s2_toggle.setMinimumHeight(32)
         self._cam_s2_toggle.clicked.connect(lambda: self._on_cam_toggle(2))
 
+        # Unconditional power-button press (CMD_CAM_TOGGLE). Sends ONE toggle
+        # regardless of believed state — reliable record control and a
+        # Teensy→camera link test (watch the camera's record LED in the feed).
+        self._cam_s1_press = self._mkbtn(
+            "S1 ⏺ Toggle", lambda: self._send(P.CMD_CAM_TOGGLE, [1]),
+            tip="Send one power-button press to S1 camera (record on/off + link test)")
+        self._cam_s2_press = self._mkbtn(
+            "S2 ⏺ Toggle", lambda: self._send(P.CMD_CAM_TOGGLE, [2]),
+            tip="Send one power-button press to S2 camera (record on/off + link test)")
+
+        # Remote Wi-Fi button (CMD_CAM_WIFI). Replaces the broken physical
+        # Wi-Fi button. Ground use only — enabling Wi-Fi suspends recording.
+        self._cam_s1_wifi = self._mkbtn(
+            "S1 📶 Wi-Fi", lambda: self._send(P.CMD_CAM_WIFI, [1]),
+            tip="Toggle S1 camera Wi-Fi (ground only)")
+        self._cam_s2_wifi = self._mkbtn(
+            "S2 📶 Wi-Fi", lambda: self._send(P.CMD_CAM_WIFI, [2]),
+            tip="Toggle S2 camera Wi-Fi (ground only)")
+
         # ── 4. VIDEO / VTX ──────────────────────────────────────
         vg = QGroupBox("Video / VTX"); vgl = QGridLayout(vg); vgl.setSpacing(4)
         vgl.addWidget(QLabel("RF:"), 0, 0)
@@ -821,8 +840,11 @@ class CommandPanel(QWidget):
         self._telem_refresh()
 
     # ------------------------------------------------------------------
-    def _send(self, cmd: int):
-        for s in self._telem_targets():
+    def _send(self, cmd: int, stages: list = None):
+        # stages=None → use the telemetry stage selector (existing behavior).
+        # Pass an explicit list (e.g. [1]) to target a specific stage.
+        targets = stages if stages is not None else self._telem_targets()
+        for s in targets:
             self._radio(s).send_frame(P.build_standard_frame(s, cmd))
             self._log_msg("SENT", cmd, s)
             if self._data.is_recording:
@@ -1358,8 +1380,19 @@ class MainWindow(QMainWindow):
         g2l.setSpacing(4)
         g2l.addWidget(self._cmd_panel._cam_s1_toggle)
         g2l.addWidget(self._cmd_panel._cam_s2_toggle)
-        note2 = QLabel("State from STATUS only")
+        # Unconditional power-button press (reliable record control + link test)
+        press_row = QHBoxLayout(); press_row.setSpacing(4)
+        press_row.addWidget(self._cmd_panel._cam_s1_press)
+        press_row.addWidget(self._cmd_panel._cam_s2_press)
+        g2l.addLayout(press_row)
+        # Remote Wi-Fi button (ground only)
+        wifi_row = QHBoxLayout(); wifi_row.setSpacing(4)
+        wifi_row.addWidget(self._cmd_panel._cam_s1_wifi)
+        wifi_row.addWidget(self._cmd_panel._cam_s2_wifi)
+        g2l.addLayout(wifi_row)
+        note2 = QLabel("Toggles state from STATUS · ⏺ Toggle = link test · Wi-Fi = ground only")
         note2.setObjectName("telem_label"); note2.setAlignment(Qt.AlignCenter)
+        note2.setWordWrap(True)
         g2l.addWidget(note2)
         bar_layout.addWidget(g2)
 

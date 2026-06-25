@@ -75,9 +75,36 @@
 #define VTX_SERIAL      Serial6
 
 // RunCam Split 4 — RunCam Device Protocol UART
-// Pin 0 = Serial1 RX (Teensy RX ← RunCam TX)
-// Pin 1 = Serial1 TX (Teensy TX → RunCam RX)
-#define CAM_SERIAL      Serial1
+//
+// CORRECT wiring is a CROSSOVER: Teensy pin 1 (TX) -> RunCam RX,
+// Teensy pin 0 (RX) <- RunCam TX. The current harness is REVERSED
+// (RunCam RX on Teensy pin 0, RunCam TX on Teensy pin 1), so hardware
+// Serial1 (which can only transmit on pin 1) can never reach the camera's RX.
+//
+// CAM_WIRING_SWAPPED = 1 works around the reversed harness entirely in
+// software: it bit-bangs UART with TX on pin 0 and RX on pin 1 via
+// SoftwareSerial, so the Teensy can control the camera WITHOUT re-soldering.
+// Teensy 4.1's 600 MHz core drives a clean 115200 TX; only the Teensy->camera
+// (TX, pin 0) direction is required for record/Wi-Fi/toggle control. The
+// camera->Teensy reply (RX, pin 1) is best-effort and only used to clear
+// FAULT_CAM / read feature bits — if it is unreliable, control still works
+// and camUsePowerToggle stays at its safe default.
+//
+// Once the TX/RX wires are physically corrected to the crossover above, set
+// CAM_WIRING_SWAPPED back to 0 to use efficient hardware Serial1.
+#define CAM_WIRING_SWAPPED  1
+
+#if CAM_WIRING_SWAPPED
+  #include <SoftwareSerial.h>
+  // SoftwareSerial(rxPin, txPin): RX = pin 1 (from RunCam TX),
+  //                               TX = pin 0 (to   RunCam RX).
+  static SoftwareSerial camSoftSerial(1, 0);
+  #define CAM_SERIAL      camSoftSerial
+#else
+  // Correct crossover wiring: pin 0 = Serial1 RX <- RunCam TX,
+  //                           pin 1 = Serial1 TX -> RunCam RX.
+  #define CAM_SERIAL      Serial1
+#endif
 #define CAM_BAUD        115200
 
 #if STAGE == 2
@@ -228,6 +255,8 @@ static const uint8_t VTX_PWR_WIRE[4] = {0x00, 0x01, 0x02, 0x03};
 #define CMD_CAM_RECORD_ON  0x10   // Start RunCam recording
 #define CMD_CAM_RECORD_OFF 0x11   // Stop RunCam recording
 #define CMD_FULL_SYS_TEST  0x12   // Full system test: VTX+cam+10Hz telem+solenoid(S2)
+#define CMD_CAM_WIFI       0x13   // Toggle RunCam Wi-Fi (RCDEVICE action 0x00) — broken-button bypass
+#define CMD_CAM_TOGGLE     0x14   // Unconditional single power-button press (RCDEVICE 0x01)
 
 #define ACK_OK        0x00
 #define ACK_REJECTED  0x01
@@ -739,6 +768,18 @@ void processUplink() {
       sendACK(cmd, ACK_OK);
       break;
 
+    case CMD_CAM_TOGGLE:
+      // Unconditional power-button press — reliable record control + link test.
+      runcamToggleRecording();
+      sendACK(cmd, ACK_OK);
+      break;
+
+    case CMD_CAM_WIFI:
+      // Remote Wi-Fi button (broken-button bypass). Ground use only.
+      runcamWifiToggle();
+      sendACK(cmd, ACK_OK);
+      break;
+
     case CMD_FULL_SYS_TEST:
       // Full system test — battery evaluation sequence.
       // Activates VTX at flight power, starts RunCam recording,
@@ -1012,8 +1053,34 @@ void runcamStopRecording() {
   else                   Serial.println(F("[CAM] STOP via explicit cmd (RCDP 0x01/0x04)"));
 }
 
+// Unconditional single power-button press. Unlike start/stop, this sends ONE
+// toggle (action 0x01) regardless of the believed camRecording state, and
+// flips that flag. Use it as the reliable record control (a physical button is
+// stateless) and as a Teensy→camera link test: if the camera's record LED
+// changes when this is sent, the UART wiring/protocol is good.
+void runcamToggleRecording() {
+  uint8_t action = RCDP_ACT_POWER;          // 0x01 simulate power button
+  runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
+  camRecording = !camRecording;
+  Serial.print(F("[CAM] POWER-BUTTON toggle sent (RCDP 0x01/0x01) → believed "));
+  Serial.println(camRecording ? F("RECORDING") : F("idle"));
+}
+
+// Toggle the camera's Wi-Fi (RCDEVICE action 0x00 = simulate Wi-Fi button).
+// Lets the ground station turn Wi-Fi on/off remotely when the physical Wi-Fi
+// button is broken/removed. Note: enabling Wi-Fi typically suspends recording
+// on the Split 4, so only use this on the ground, not in flight.
+void runcamWifiToggle() {
+  uint8_t action = RCDP_ACT_WIFI;           // 0x00 simulate Wi-Fi button
+  runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
+  Serial.println(F("[CAM] WIFI-BUTTON toggle sent (RCDP 0x01/0x00)"));
+}
+
 bool initRunCam() {
   CAM_SERIAL.begin(CAM_BAUD);
+#if CAM_WIRING_SWAPPED
+  CAM_SERIAL.listen();   // SoftwareSerial: start receiving on RX pin (pin 1)
+#endif
   // RunCam Split 4 needs 2-3 s to boot — wait before first probe.
   delay(2000);
 
