@@ -47,6 +47,8 @@ CMD_CAM_WIFI        = 0x13   # Toggle RunCam Wi-Fi (RCDEVICE action 0x00) — re
 CMD_CAM_TOGGLE      = 0x14   # Unconditional single power-button press (RCDEVICE action 0x01).
                              # Always sends one toggle regardless of believed state — use as the
                              # reliable record control and as a Teensy→camera link diagnostic.
+CMD_CAM_CHANGE_MODE = 0x15   # RunCam CHANGE_MODE (RCDEVICE 0x02): enter/exit OSD setup menu
+CMD_CAM_REC_SHOTGUN = 0x16   # Stage 2 multi-protocol record toggle (RCDEVICE 0x03/0x04 + 0x01 + legacy 0x55)
 
 CMD_NAMES = {
     CMD_VIDEO_ON:       "VIDEO_ON",
@@ -69,6 +71,8 @@ CMD_NAMES = {
     CMD_FULL_SYS_TEST:  "FULL_SYS_TEST",
     CMD_CAM_WIFI:       "CAM_WIFI",
     CMD_CAM_TOGGLE:     "CAM_TOGGLE",
+    CMD_CAM_CHANGE_MODE: "CAM_CHANGE_MODE",
+    CMD_CAM_REC_SHOTGUN: "CAM_REC_SHOTGUN",
 }
 
 # -----------------------------------------------------------------------------

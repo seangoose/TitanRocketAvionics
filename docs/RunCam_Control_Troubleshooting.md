@@ -147,7 +147,43 @@ ground. A clear CAM flag means the camera answered at least once and the link is
 
 ---
 
-## 5. Remote Wi-Fi control (broken Wi-Fi button bypass)
+## 5. Wi-Fi vs. OSD menu — how to configure the camera remotely
+
+### Verified: the Wi-Fi command is real but does little on a recording Split 4
+Bench result: **record (power button, 0x01) works, Wi-Fi (0x00) shows no LED change.** That is
+expected, and the earlier "wire it up and use Betaflight Camera Wi-Fi" advice was generic and
+misleading for this case. Verified against primary sources:
+
+- RunCam Wi-Fi requires the **Wi-Fi module/capability**, and the toggle only fires while the
+  camera is in **standby** — not in video/recording mode. Since record works, the camera is in
+  video mode, so a Wi-Fi-button press there does not toggle Wi-Fi (no LED1 flash).
+- RunCam's protocol notes state `SIMULATE_WIFI_BTN` on a Split "simulates the mode button… you
+  can only navigate, not change a setting." So even when it does something, it is not a path to
+  changing settings.
+
+The `📶 Wi-Fi` buttons are kept (harmless, and they work if your unit has the Wi-Fi module and
+is in standby), but **Wi-Fi is not the way to configure this camera in the field.**
+
+### Use the on-screen OSD menu instead (no Wi-Fi, no physical button)
+The Split 4's settings live in its **OSD menu**, drawn over the analog video feed you already
+see in the ground station. Per the Split 4 manual, the protocol drives it like this:
+
+- **`⚙ OSD Mode` button → `CMD_CAM_CHANGE_MODE` (RCDEVICE 0x02):** switch between Video and OSD
+  setup mode; when already in the OSD, this **exits** the menu.
+- **`⏺ Toggle` button → `CMD_CAM_TOGGLE` (RCDEVICE 0x01, power):** in the OSD it **moves to the
+  next menu item**; in video mode it starts/stops recording.
+
+So to change a setting (e.g. turn **Loop Recording OFF**): press **⚙ OSD Mode** to bring up the
+menu on the video feed, use **⏺ Toggle** to step through items, and **⚙ OSD Mode** again to
+exit. Everything is visible on the video panel — no Wi-Fi and no working button required.
+
+> Caveat: this is a 2-button on-screen menu, so navigation is sequential and a little tedious,
+> and the exact item/value behavior depends on the camera's firmware menu. Test it on the bench
+> with the video feed up before relying on it. If your unit turns out to have a real Wi-Fi
+> module, you can still use `📶 Wi-Fi` (camera in standby) to pair the phone app for a richer UI.
+
+### Original Wi-Fi notes (kept for reference)
+
 
 You mentioned the physical Wi-Fi button broke off. I added **`CMD_CAM_WIFI` (0x13)** and
 **"S1/S2 📶 Wi-Fi"** buttons to the RunCam panel. This sends RCDEVICE action `0x00` (simulate

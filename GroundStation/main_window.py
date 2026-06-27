@@ -549,6 +549,17 @@ class CommandPanel(QWidget):
             "S2 📶 Wi-Fi", lambda: self._send(P.CMD_CAM_WIFI, [2]),
             tip="Toggle S2 camera Wi-Fi (ground only)")
 
+        # OSD menu navigation (CMD_CAM_CHANGE_MODE = RCDEVICE 0x02). Enter/exit
+        # the camera's on-screen menu; navigate items with the ⏺ Toggle (power)
+        # button. This is how to change camera settings (e.g. Loop Recording)
+        # remotely over the video feed — no Wi-Fi or physical button needed.
+        self._cam_s1_mode = self._mkbtn(
+            "S1 ⚙ OSD Mode", lambda: self._send(P.CMD_CAM_CHANGE_MODE, [1]),
+            tip="S1: enter/exit camera OSD menu; navigate with ⏺ Toggle")
+        self._cam_s2_mode = self._mkbtn(
+            "S2 ⚙ OSD Mode", lambda: self._send(P.CMD_CAM_CHANGE_MODE, [2]),
+            tip="S2: enter/exit camera OSD menu; navigate with ⏺ Toggle")
+
         # ── 4. VIDEO / VTX ──────────────────────────────────────
         vg = QGroupBox("Video / VTX"); vgl = QGridLayout(vg); vgl.setSpacing(4)
         vgl.addWidget(QLabel("RF:"), 0, 0)
@@ -757,10 +768,16 @@ class CommandPanel(QWidget):
     def _on_cam_toggle(self, stage: int):
         """Send cam record command. Do NOT update toggle visuals — that comes from STATUS."""
         if stage == 1:
+            # Stage 1 camera works on the standard RCDEVICE path: explicit ON/OFF.
             cmd = P.CMD_CAM_RECORD_OFF if self._cam_s1_recording else P.CMD_CAM_RECORD_ON
             radio = self._r1
         else:
-            cmd = P.CMD_CAM_RECORD_OFF if self._cam_s2_recording else P.CMD_CAM_RECORD_ON
+            # Stage 2 camera is an unknown/older Split 4 revision. Fire the
+            # multi-protocol "shotgun" record TOGGLE (RCDEVICE explicit 0x03/0x04
+            # + power toggle 0x01 + legacy 0x55) so whichever protocol it speaks
+            # flips recording. This is a pure toggle, so it does not depend on the
+            # (unreliable) believed on/off state for direction.
+            cmd = P.CMD_CAM_REC_SHOTGUN
             radio = self._r2
         radio.send_frame(P.build_standard_frame(stage, cmd))
         self._log_msg("SENT", cmd, stage)
@@ -1390,6 +1407,10 @@ class MainWindow(QMainWindow):
         wifi_row.addWidget(self._cmd_panel._cam_s1_wifi)
         wifi_row.addWidget(self._cmd_panel._cam_s2_wifi)
         g2l.addLayout(wifi_row)
+        mode_row = QHBoxLayout(); mode_row.setSpacing(4)
+        mode_row.addWidget(self._cmd_panel._cam_s1_mode)
+        mode_row.addWidget(self._cmd_panel._cam_s2_mode)
+        g2l.addLayout(mode_row)
         note2 = QLabel("Toggles state from STATUS · ⏺ Toggle = link test · Wi-Fi = ground only")
         note2.setObjectName("telem_label"); note2.setAlignment(Qt.AlignCenter)
         note2.setWordWrap(True)

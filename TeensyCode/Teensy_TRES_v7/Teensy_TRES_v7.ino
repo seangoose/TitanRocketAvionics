@@ -36,7 +36,7 @@
 // ================================================================
 //  *** EDIT BEFORE EVERY FLASH ***
 // ================================================================
-#define STAGE      1
+#define STAGE      2
 #define CALLSIGN   "KO6NHZ"
 
 // Self-test mode — set 1 for bench testing, 0 for flight
@@ -257,6 +257,8 @@ static const uint8_t VTX_PWR_WIRE[4] = {0x00, 0x01, 0x02, 0x03};
 #define CMD_FULL_SYS_TEST  0x12   // Full system test: VTX+cam+10Hz telem+solenoid(S2)
 #define CMD_CAM_WIFI       0x13   // Toggle RunCam Wi-Fi (RCDEVICE action 0x00) — broken-button bypass
 #define CMD_CAM_TOGGLE     0x14   // Unconditional single power-button press (RCDEVICE 0x01)
+#define CMD_CAM_CHANGE_MODE 0x15   // RunCam CHANGE_MODE (RCDEVICE 0x02): enter/exit OSD setup menu
+#define CMD_CAM_REC_SHOTGUN 0x16   // Stage 2 multi-protocol record toggle (tries all variants)
 
 #define ACK_OK        0x00
 #define ACK_REJECTED  0x01
@@ -780,6 +782,18 @@ void processUplink() {
       sendACK(cmd, ACK_OK);
       break;
 
+    case CMD_CAM_CHANGE_MODE:
+      // Enter/exit camera OSD menu (navigate with CMD_CAM_TOGGLE / power button).
+      runcamChangeMode();
+      sendACK(cmd, ACK_OK);
+      break;
+
+    case CMD_CAM_REC_SHOTGUN:
+      // Stage 2 multi-protocol record toggle — fire all variants at once.
+      runcamShotgunToggle();
+      sendACK(cmd, ACK_OK);
+      break;
+
     case CMD_FULL_SYS_TEST:
       // Full system test — battery evaluation sequence.
       // Activates VTX at flight power, starts RunCam recording,
@@ -968,6 +982,7 @@ bool initVTX() {
 #define RCDP_CMD_CTRL     0x01
 #define RCDP_ACT_WIFI     0x00
 #define RCDP_ACT_POWER    0x01   // Simulate power button = toggle record (Split 4 method)
+#define RCDP_ACT_CHGMODE  0x02   // Change mode: video <-> OSD setup menu
 #define RCDP_ACT_START    0x03   // Explicit start recording (v2) — IGNORED by Split 4 firmware
 #define RCDP_ACT_STOP     0x04   // Explicit stop recording  (v2) — IGNORED by Split 4 firmware
 
@@ -1074,6 +1089,49 @@ void runcamWifiToggle() {
   uint8_t action = RCDP_ACT_WIFI;           // 0x00 simulate Wi-Fi button
   runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
   Serial.println(F("[CAM] WIFI-BUTTON toggle sent (RCDP 0x01/0x00)"));
+}
+
+// Change camera mode (RCDEVICE action 0x02): Video <-> OSD setup menu; exits the
+// menu when already in it. With the power button (0x01, "next menu item" in OSD)
+// this drives the on-screen menu over the video feed to change settings.
+void runcamChangeMode() {
+  uint8_t action = RCDP_ACT_CHGMODE;        // 0x02 change mode / OSD enter-exit
+  runcamSendCmd(RCDP_CMD_CTRL, &action, 1);
+  Serial.println(F("[CAM] CHANGE_MODE sent (RCDP 0x01/0x02) — video<->OSD"));
+}
+
+// Legacy RCSPLIT protocol (RunCam Split firmware <= 1.1.0): header 0x55, cmd 0x01,
+// arg, CRC8 (poly 0x31, MSB-first) over [0x55,0x01,arg,0xAA], tail 0xAA.
+// arg: 0x01=Wi-Fi, 0x02=power(record toggle), 0x03=change mode.
+// Used for older Split cameras that ignore the 0xCC RCDEVICE frames entirely.
+void runcamLegacySend(uint8_t arg) {
+  uint8_t buf[5];
+  buf[0]=0x55; buf[1]=0x01; buf[2]=arg; buf[3]=0xAA;   // 0xAA placeholder for CRC calc
+  uint8_t crc = crc8_rcdp(buf, 4);                      // poly 0x31 MSB-first over 4 bytes
+  buf[3]=crc; buf[4]=0xAA;
+  CAM_SERIAL.write(buf, 5);
+  CAM_SERIAL.flush();
+}
+
+// MULTI-PROTOCOL record toggle ("shotgun"). Fires every record-control variant we
+// know, aligned to the desired direction, so whichever protocol the camera actually
+// speaks will toggle recording. Intended for the Stage 2 camera whose firmware/
+// revision is unknown. Only one variant takes effect on a single-protocol camera;
+// the rest are ignored. (A camera that honors BOTH explicit start/stop AND the power
+// toggle could double-act — not expected on the non-responding Stage 2 unit.)
+void runcamShotgunToggle() {
+  bool want = !camRecording;                // toggle intent
+  // 1) RCDEVICE explicit set-state (firmware honoring start/stop bits)
+  uint8_t ex = want ? RCDP_ACT_START : RCDP_ACT_STOP;   // 0x03 / 0x04
+  runcamSendCmd(RCDP_CMD_CTRL, &ex, 1);     delay(30);
+  // 2) RCDEVICE power-button toggle (firmware honoring power button)
+  uint8_t pw = RCDP_ACT_POWER;              // 0x01
+  runcamSendCmd(RCDP_CMD_CTRL, &pw, 1);     delay(30);
+  // 3) Legacy RCSPLIT power-button toggle (old 0x55 firmware)
+  runcamLegacySend(0x02);                   delay(30);
+  camRecording = want;
+  Serial.print(F("[CAM] SHOTGUN record toggle (RCDEVICE 0x03/0x04 + 0x01 + legacy 0x55) -> believed "));
+  Serial.println(want ? F("RECORDING") : F("idle"));
 }
 
 bool initRunCam() {
